@@ -10,3 +10,4 @@ reports/
 build/
 dist/
 web/dist/
+evals/results/
