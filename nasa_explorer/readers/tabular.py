@@ -148,4 +148,7 @@ def read_json(path: Path, opts: ReadOptions) -> ReadResult:
     requires=("pyarrow",),
 )
 def read_parquet(path: Path, opts: ReadOptions) -> ReadResult:
-    return ReadResult("table", pd.read_parquet(path))
+    # pyarrow directly: pd.read_parquet breaks in Pyodide when pyarrow loads after pandas
+    import pyarrow.parquet as pq
+
+    return ReadResult("table", pq.read_table(path).to_pandas())

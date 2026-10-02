@@ -37,6 +37,14 @@ Generic "drop any NASA/scientific file in, get a report" tool for Space Apps hac
 - HDF4 uses `scale * (raw - offset)` (MODIS), CF uses `raw * scale + offset`. See `readers/_cf.py`.
 - Tabular analysis treats -9999/-999/... as missing (NASA POWER, FIRMS conventions) and logs it in notes.
 - Report f-strings must stay Python 3.10 compatible (no nested same-type quotes).
+- **Pyodide fatal crashes cannot be caught.** The `IN_BROWSER` flag in `core.py` routes around them:
+  - The netCDF4 engine overflows the JS stack, so the browser uses h5netcdf and scipy only.
+  - fiona crashes on GeoPackage and has no KML driver, so the browser uses
+    `readers/_purevector.py`.
+  - `pd.read_parquet` fails when pyarrow loads after pandas, so the reader uses
+    `pyarrow.parquet` directly.
+
+  Verify browser changes on real Pyodide with `E2E_PYODIDE=1`, not only the stubbed UI test.
 - The browser build has no pyogrio, pymupdf, eccodes or pyhdf. Readers must keep heavy imports
   inside the function and declare them in `requires`, so the registry disables them cleanly.
   The page then loads the missing modules on demand and retries (`MODULE_SOURCES` in `app.js`).

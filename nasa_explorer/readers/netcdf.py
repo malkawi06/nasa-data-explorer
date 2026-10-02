@@ -6,10 +6,12 @@ from pathlib import Path
 
 import xarray as xr
 
-from ..core import NotThisFormat, ReadOptions, ReadResult
+from ..core import IN_BROWSER, NotThisFormat, ReadOptions, ReadResult
 from ..registry import reader
 
-ENGINES = ("netcdf4", "h5netcdf", "scipy")
+# In the browser (Pyodide) the netCDF4 C library overflows the JS stack and kills the
+# runtime - uncatchably - so only h5netcdf (NetCDF-4/HDF5) and scipy (NetCDF-3) are used.
+ENGINES = ("h5netcdf", "scipy") if IN_BROWSER else ("netcdf4", "h5netcdf", "scipy")
 
 
 def open_any(path: Path, **kw) -> xr.Dataset:

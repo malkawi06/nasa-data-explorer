@@ -8,7 +8,7 @@ const MAX_MB = 600; // wasm32 memory is limited; larger files are better run wit
 
 // Always-needed Pyodide packages and pure-Python wheels from PyPI.
 const CORE = {
-  pkgs: ["micropip", "numpy", "pandas", "xarray", "scipy", "matplotlib", "jinja2", "h5py", "netcdf4", "cftime", "pillow", "xlrd", "requests"],
+  pkgs: ["micropip", "numpy", "pandas", "xarray", "scipy", "matplotlib", "jinja2", "h5py", "cftime", "pillow", "xlrd", "requests"],
   pip: ["pymannkendall", "h5netcdf", "openpyxl", "markdown"],
 };
 // Optional readers: module name used in the reader's `requires` -> what provides it.
@@ -125,6 +125,12 @@ function applyLang(lang) {
 async function install({ pkgs = [], pip = [] }) {
   const newPkgs = pkgs.filter((p) => !state.loaded.has(p));
   const newPip = pip.filter((p) => !state.loaded.has(p));
+  // PROJ must be loaded before GDAL-based packages (fiona, rasterio): the other order makes
+  // the first pyproj call kill the runtime ("null function or function signature mismatch").
+  if (newPkgs.some((p) => ["fiona", "rasterio", "geopandas"].includes(p)) && !state.loaded.has("pyproj")) {
+    await state.py.loadPackage(["pyproj"]);
+    state.loaded.add("pyproj");
+  }
   if (newPkgs.length) await state.py.loadPackage(newPkgs);
   if (newPip.length) await state.py.runPythonAsync(`import micropip\nawait micropip.install(${JSON.stringify(newPip)})`);
   for (const p of [...newPkgs, ...newPip]) state.loaded.add(p);

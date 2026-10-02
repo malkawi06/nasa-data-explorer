@@ -84,3 +84,34 @@ def test_chat_on_document_uses_relevant_pages(samples, tmp_path, monkeypatch):
     assert "[page 2]" in first["step"]["prompt"] and "Arabic" in first["step"]["prompt"]
     done = json.loads(bridge.ai_next(first["job"], "GPM IMERG [p. 2]"))
     assert done == {"job": first["job"], "done": True, "answer": "GPM IMERG [p. 2]"}
+
+
+def test_pure_python_kml_and_gpkg_match_gdal(samples):
+    """The browser-only readers must agree with the GDAL-backed ones."""
+    import geopandas as gpd
+
+    from nasa_explorer.readers._purevector import read_gpkg, read_kml
+
+    for key, reader_fn in (("gpkg", read_gpkg), ("kml", read_kml), ("kmz", read_kml)):
+        if key not in samples:
+            continue
+        path = samples[key][0]
+        ours = next(iter(reader_fn(path).values()))
+        ref = gpd.read_file(f"/vsizip/{path}/doc.kml") if key == "kmz" else gpd.read_file(path)
+        assert len(ours) == len(ref), key
+        ours_xy = [(round(g.x, 6), round(g.y, 6)) for g in ours.geometry]
+        ref_xy = [(round(g.x, 6), round(g.y, 6)) for g in ref.geometry]
+        assert ours_xy == ref_xy, key
+        assert ours.crs.to_epsg() == 4326
+    gp = next(iter(read_gpkg(samples["gpkg"][0]).values()))
+    assert {"name", "value"} <= set(gp.columns)
+
+
+def test_vector_reader_uses_pure_path_in_browser(samples, monkeypatch):
+    from nasa_explorer.core import ReadOptions
+    from nasa_explorer.readers import vector
+
+    monkeypatch.setattr(vector, "IN_BROWSER", True)
+    for key in ("gpkg", "kml", "kmz"):
+        res = vector.read_vector(samples[key][0], ReadOptions())
+        assert res.kind == "table" and len(res.data) == 10 and res.metadata["crs"] == "EPSG:4326"

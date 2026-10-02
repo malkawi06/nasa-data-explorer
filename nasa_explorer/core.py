@@ -2,8 +2,12 @@
 
 from __future__ import annotations
 
+import sys
 from dataclasses import dataclass, field
 from typing import Any, Literal
+
+# Running inside Pyodide (the website). Some native backends must be avoided there.
+IN_BROWSER = sys.platform == "emscripten"
 
 Kind = Literal["grid", "table", "document", "image", "tree", "binary"]
 

@@ -5,7 +5,7 @@ from __future__ import annotations
 import zipfile
 from pathlib import Path
 
-from ..core import ReadOptions, ReadResult
+from ..core import IN_BROWSER, ReadOptions, ReadResult
 from ..registry import looks_like_text, reader, text_head
 
 
@@ -33,6 +33,19 @@ def _list_layers(src: str) -> list[str]:
         return list(fiona.listlayers(src))
 
 
+def _pure_frames(path: Path, head: bytes) -> dict | None:
+    """Browser build: avoid fiona for GeoPackage (crashes Pyodide) and KML (no driver)."""
+    if not IN_BROWSER:
+        return None
+    from ._purevector import read_gpkg, read_kml
+
+    if head.startswith(b"SQLite format 3"):
+        return read_gpkg(path)
+    if path.suffix.lower() in (".kml", ".kmz") or b"<kml" in head:
+        return read_kml(path)
+    return None
+
+
 @reader(
     "vector",
     category="Geospatial",
@@ -45,6 +58,10 @@ def _list_layers(src: str) -> list[str]:
 def read_vector(path: Path, opts: ReadOptions) -> ReadResult:
     import geopandas as gpd
 
+    with open(path, "rb") as fh:
+        head = fh.read(512)
+    if (frames := _pure_frames(path, head)) is not None:
+        return _result(frames)
     src = str(path)
     if path.suffix.lower() == ".kmz":
         with zipfile.ZipFile(path) as zf:
@@ -60,6 +77,12 @@ def read_vector(path: Path, opts: ReadOptions) -> ReadResult:
             continue
     if not frames:
         frames[""] = gpd.read_file(src)
+    return _result(frames)
+
+
+def _result(frames: dict) -> ReadResult:
+    if not frames:
+        raise ValueError("no layers with features")
     layer, gdf = max(frames.items(), key=lambda kv: len(kv[1]))
     meta = {
         "crs": gdf.crs.to_string() if gdf.crs else None,

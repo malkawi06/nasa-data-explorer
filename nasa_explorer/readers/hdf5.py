@@ -8,7 +8,7 @@ from pathlib import Path
 import pandas as pd
 import xarray as xr
 
-from ..core import ReadOptions, ReadResult
+from ..core import IN_BROWSER, ReadOptions, ReadResult
 from ..registry import reader
 from ._cf import clean_attrs
 
@@ -19,7 +19,7 @@ def _as_grid(path: Path) -> xr.Dataset | None:
     for kw in (
         {"engine": "h5netcdf"},
         {"engine": "h5netcdf", "phony_dims": "sort"},
-        {"engine": "netcdf4"},
+        *([] if IN_BROWSER else [{"engine": "netcdf4"}]),
     ):
         try:
             ds = xr.open_dataset(path, **kw)
