@@ -136,8 +136,7 @@ def grid_map(
             interpolation="nearest",
         )
     if pts is not None:
-        ax.scatter(*pts, s=2, color=INK, linewidths=0, label="significant (p<0.05)")
-        ax.legend(frameon=False, fontsize=8, labelcolor=INK_2, loc="lower left", markerscale=3)
+        ax.scatter(*pts, s=2, color=INK, linewidths=0)  # the title explains the dots
     if extent is not None or (lat is not None and lat.ndim == 2):
         ax.set_xlabel("longitude")
         ax.set_ylabel("latitude")
@@ -186,9 +185,7 @@ def _cartopy_map(arr, extent, cmap, vmin, vmax, title, label, pts=None) -> bytes
             color=INK,
             linewidths=0,
             transform=ccrs.PlateCarree(),
-            label="significant (p<0.05)",
         )
-        ax.legend(frameon=False, fontsize=8, labelcolor=INK_2, loc="lower left", markerscale=3)
     ax.coastlines(linewidth=0.6, color=INK_2)
     ax.set_extent(extent, crs=ccrs.PlateCarree())
     gl = ax.gridlines(draw_labels=True, linewidth=0.4, color=GRID)
@@ -202,13 +199,26 @@ def image2d(arr: np.ndarray, title: str, label: str = "") -> bytes:
     return grid_map(arr, None, None, title, label, use_cartopy=False)
 
 
+def _runs(dates: list, max_gap_days: int = 62) -> list[list]:
+    """Group dates that follow each other (e.g. three months of one heatwave) for one label."""
+    runs: list[list] = []
+    for d in dates:
+        if runs and (d - runs[-1][-1]).days <= max_gap_days:
+            runs[-1].append(d)
+        else:
+            runs.append([d])
+    return runs
+
+
 def time_series(
     series: dict[str, pd.Series],
     title: str,
     ylabel: str = "",
     trend_lines: dict[str, tuple[float, float]] | None = None,
+    marks: dict[str, list[str]] | None = None,
 ) -> bytes:
-    """Up to 8 series; a single series needs no legend (the title names it)."""
+    """Up to 8 series; a single series needs no legend (the title names it).
+    `marks` labels dates (e.g. unusual months) on the named series."""
     items = list(series.items())[: len(SERIES)]
     fig, axes = plt.subplots(
         len(items), 1, figsize=(8, 2.4 * len(items) + 0.4), sharex=True, squeeze=False
@@ -223,6 +233,21 @@ def time_series(
             marker="o" if len(s) <= 40 else None,
             markersize=4,
         )
+        for group in _runs(sorted(pd.Timestamp(d) for d in (marks or {}).get(name, []))):
+            idx = s.index[s.index.get_indexer(group, method="nearest")]
+            ax.scatter(
+                idx, s.loc[idx], s=36, facecolors="none", edgecolors=INK, linewidths=1.2, zorder=3
+            )
+            peak = s.loc[idx].abs().idxmax()
+            text = group[0].strftime("%Y-%m") + (f" – {group[-1]:%Y-%m}" if len(group) > 1 else "")
+            ax.annotate(
+                text,
+                (peak, s.loc[peak]),
+                xytext=(6, -2),
+                textcoords="offset points",
+                fontsize=7.5,
+                color=INK_2,
+            )
         if trend_lines and name in trend_lines:
             slope, intercept = trend_lines[name]
             x = s.index.year + (s.index.dayofyear - 1) / 365.25

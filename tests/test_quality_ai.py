@@ -207,3 +207,25 @@ def test_ai_panel_in_report(samples, tmp_path, monkeypatch):
 def test_parse_json_tolerates_noise():
     assert verify.parse_json('Here you go:\n```json\n{"a": [1, 2,],}\n```') == {"a": [1, 2]}
     assert verify.parse_json("no json here") is None
+
+
+def test_heatwave_is_reported_as_extreme_and_rain_is_not_an_outlier():
+    idx = pd.date_range("2000-01-01", periods=240, freq="MS")
+    y = np.asarray(
+        10 * np.sin(2 * np.pi * (idx.month - 1) / 12)
+        + 0.02 * np.arange(240) / 12
+        + RNG.normal(0, 0.2, 240)
+    )
+    hot = np.asarray((idx.year == 2010) & idx.month.isin([6, 7, 8]))
+    y[hot] += 3
+    t = trend(pd.Series(y, idx), "t2m", "K")
+    assert sorted(e["date"] for e in t["extremes"]) == ["2010-06", "2010-07", "2010-08"]
+    issues = check("grid", {"statistics": {}, "coverage": {}, "trends": [t]})
+    assert any(q["code"] == "extremes" and "2010-07" in q["message"] for q in issues)
+
+    rain = _stats(min=0.0, max=40.0, p5=0.0, p25=4e-14, p50=0.001, p75=0.3, p95=3.0)
+    assert not [
+        q
+        for q in check("grid", {"statistics": {"precip": rain}, "coverage": {}})
+        if q["code"] == "outliers"
+    ]

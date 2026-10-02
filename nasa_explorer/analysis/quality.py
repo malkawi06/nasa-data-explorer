@@ -117,7 +117,8 @@ def _value_checks(name: str, st: dict, units: str) -> list[dict]:
             )
         )
     iqr = st.get("p75", 0) - st.get("p25", 0)
-    if iqr > 0 and (hi > st["p75"] + 20 * iqr or lo < st["p25"] - 20 * iqr):
+    zero_inflated = abs(st.get("p25", 0)) <= 1e-6 * max(1.0, abs(hi))  # e.g. rain: mostly dry
+    if iqr > 0 and not zero_inflated and (hi > st["p75"] + 20 * iqr or lo < st["p25"] - 20 * iqr):
         out.append(
             _issue(
                 "info",
@@ -195,7 +196,22 @@ def _coverage_checks(kind: str, analysis: dict) -> list[dict]:
                     "info",
                     "seasonal",
                     tr["variable"],
-                    f"{tr['variable']}: strong annual cycle (explains {100 * tr['seasonal_strength']:.0f}% of variance); trend computed on deseasonalized values",
+                    f"{tr['variable']}: strong annual cycle (explains {_pct(tr['seasonal_strength'])} of variance); trend computed on deseasonalized values",
+                )
+            )
+        if tr.get("extremes"):
+            ex = ", ".join(
+                f"{e['date']} ({e['anomaly']:+.3g} {tr.get('units', '')}, {e['z']:+.1f}σ)".replace(
+                    " ,", ","
+                )
+                for e in tr["extremes"][:5]
+            )
+            out.append(
+                _issue(
+                    "info",
+                    "extremes",
+                    tr["variable"],
+                    f"{tr['variable']}: unusual periods vs the normal for that time of year: {ex}",
                 )
             )
         if "Hamed-Rao" in tr.get("method", ""):
@@ -208,6 +224,10 @@ def _coverage_checks(kind: str, analysis: dict) -> list[dict]:
                 )
             )
     return out
+
+
+def _pct(share: float) -> str:
+    return ">99%" if share > 0.99 else f"{100 * share:.0f}%"
 
 
 def _document_checks(analysis: dict) -> list[dict]:

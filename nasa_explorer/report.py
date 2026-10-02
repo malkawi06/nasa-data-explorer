@@ -49,10 +49,15 @@ def fmt(v: Any) -> str:
     if isinstance(v, float | np.floating):
         if not math.isfinite(v):
             return "–"
+        if v != 0 and abs(v) < 1e-12:  # float noise around zero
+            return "≈0"
         return f"{v:.4g}" if abs(v) < 1e6 or v == 0 else f"{v:.3e}"
     if isinstance(v, int | np.integer) and not isinstance(v, bool):
         return f"{v:,}"
-    return html.escape(str(v))
+    text = str(v)
+    if text.endswith(" 00:00:00"):
+        text = text[:-9]
+    return html.escape(text)
 
 
 def to_html(obj: Any, depth: int = 0) -> str:

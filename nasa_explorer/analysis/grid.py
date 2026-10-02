@@ -10,7 +10,7 @@ import xarray as xr
 
 from .. import plots
 from ..core import ReadOptions, ReadResult
-from .stats import MAX_SAMPLE, numeric_stats, seasonal_cycle, time_coverage, trend
+from .stats import MAX_SAMPLE, anomalies, numeric_stats, seasonal_cycle, time_coverage, trend
 
 LAT_NAMES = {"lat", "latitude", "nav_lat", "lats", "xlat", "lat_0", "gridlat_0"}
 LON_NAMES = {"lon", "longitude", "nav_lon", "lons", "long", "xlong", "lon_0", "gridlon_0"}
@@ -106,7 +106,7 @@ def _var_summary(name: str, da: xr.DataArray, stats: dict) -> dict:
     enc = da.encoding
     out = {
         "name": name,
-        "dims": "x".join(f"{d}:{da.sizes[d]}" for d in da.dims),
+        "dims": " × ".join(f"{d} {da.sizes[d]}" for d in da.dims),
         "dtype": str(enc.get("dtype", da.dtype)),
         "units": str(da.attrs.get("units", "")),
         "long_name": str(da.attrs.get("long_name", da.attrs.get("standard_name", ""))),
@@ -233,6 +233,31 @@ def pixel_trends(
     return slope, p, sub.isel({tdim: 0})
 
 
+def _when(ts) -> str:
+    ts = pd.Timestamp(ts)
+    return ts.strftime("%Y-%m-%d") if ts == ts.normalize() else ts.strftime("%Y-%m-%d %H:%M")
+
+
+def _series_plot(s: pd.Series, name: str, t: dict | None, units: str) -> bytes:
+    """Raw series, plus the anomaly series (annual cycle removed) when the cycle dominates,
+    so the trend and unusual periods are visible instead of hidden by the seasons."""
+    anom = anomalies(s) if t and t.get("seasonal") else None
+    if anom is None:
+        lines = {name: (t["slope_per_year"], t["intercept"])} if t else None
+        return plots.time_series({name: s}, f"Area-mean {name}", units, lines)
+    x = anom.index.year + (anom.index.dayofyear - 1) / 365.25
+    line = (t["slope_per_year"], float(anom.mean() - t["slope_per_year"] * x.to_numpy().mean()))
+    label = f"{name} anomaly"
+    marks = {label: [e["date"] for e in t.get("extremes", [])]}
+    return plots.time_series(
+        {name: s, label: anom},
+        f"Area-mean {name}: raw and with the annual cycle removed",
+        units,
+        {label: line},
+        marks,
+    )
+
+
 def analyze_grid(res: ReadResult, opts: ReadOptions) -> tuple[dict, list[tuple[str, bytes]]]:
     ds, notes = subset(res.data, opts)
     lat, lon, tname = find_coord(ds, "lat"), find_coord(ds, "lon"), find_coord(ds, "time")
@@ -282,13 +307,10 @@ def analyze_grid(res: ReadResult, opts: ReadOptions) -> tuple[dict, list[tuple[s
             if t:
                 trends.append(t)
             if opts.plots and v == main:
-                lines = {str(v): (t["slope_per_year"], t["intercept"])} if t else None
                 figs.append(
                     (
                         f"Area-mean time series: {v}",
-                        plots.time_series(
-                            {str(v): s}, f"Area-mean {v}", str(ds[v].attrs.get("units", "")), lines
-                        ),
+                        _series_plot(s, str(v), t, str(ds[v].attrs.get("units", ""))),
                     )
                 )
     trend_map = None
@@ -358,7 +380,7 @@ def analyze_grid(res: ReadResult, opts: ReadOptions) -> tuple[dict, list[tuple[s
         arr, la, lo, fixed = _map_slice(da, ds, lat, lon)
         when = ", ".join(f"{k}[0]" for k in fixed) or "single field"
         if tdim in fixed and tindex is not None and len(tindex):
-            when = str(tindex[0])[:19]
+            when = _when(tindex[0])
         units = str(da.attrs.get("units", ""))
         figs.insert(
             0, (f"Map: {main} ({when})", plots.grid_map(arr, la, lo, f"{main} - {when}", units))

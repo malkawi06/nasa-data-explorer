@@ -167,8 +167,37 @@ def trend(series: pd.Series, name: str, units: str = "") -> dict | None:
         )
     except ImportError:
         out.update(mk_trend="n/a", mk_p=float("nan"), method="linear regression only")
+    out["extremes"] = _extremes(s.index, residuals)
     out["text"] = describe_trend(out)
     return out
+
+
+EXTREME_Z = 5.0  # robust z; lower values flag ordinary heavy-tailed noise
+
+
+def _extremes(idx: pd.DatetimeIndex, residuals: np.ndarray, top: int = 5) -> list[dict]:
+    """Periods far from normal after removing the annual cycle and the trend (robust z-score)."""
+    med = float(np.median(residuals))
+    scale = 1.4826 * float(np.median(np.abs(residuals - med)))
+    if not np.isfinite(scale) or scale == 0:
+        return []
+    z = (residuals - med) / scale
+    order = np.argsort(-np.abs(z))
+    fmt = "%Y-%m" if len(idx) > 1 and (idx[1] - idx[0]).days >= 27 else "%Y-%m-%d"
+    return [
+        {"date": idx[i].strftime(fmt), "anomaly": float(residuals[i] - med), "z": float(z[i])}
+        for i in order[:top]
+        if abs(z[i]) >= EXTREME_Z
+    ]
+
+
+def anomalies(series: pd.Series) -> pd.Series | None:
+    """Series minus its mean annual cycle (None when there is no strong cycle)."""
+    s = _clean_series(series)
+    clim = seasonal_cycle(s)
+    if clim is None:
+        return None
+    return s - clim.reindex(s.index.month).to_numpy()
 
 
 def _complete_months(s: pd.Series) -> bool:
