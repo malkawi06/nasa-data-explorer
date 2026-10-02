@@ -115,3 +115,28 @@ def test_vector_reader_uses_pure_path_in_browser(samples, monkeypatch):
     for key in ("gpkg", "kml", "kmz"):
         res = vector.read_vector(samples[key][0], ReadOptions())
         assert res.kind == "table" and len(res.data) == 10 and res.metadata["crs"] == "EPSG:4326"
+
+
+def test_image_vision_is_opt_in_and_boxes_reach_the_panel(samples, tmp_path, monkeypatch):
+    res = _run(tmp_path, monkeypatch, [samples["png"][0]])["photo.png"]
+    off = json.loads(bridge.ai_start(res["key"], "en", "gemini", "m"))
+    assert off["step"]["image"] is None and "image.brightness_pct" in off["step"]["prompt"]
+    groq = json.loads(bridge.ai_start(res["key"], "en", "groq", "m", True))
+    assert groq["step"]["image"] is None  # not a vision provider: nothing leaves the browser
+    on = json.loads(bridge.ai_start(res["key"], "en", "gemini", "m", True))
+    assert on["step"]["image"] and on["step"]["tokens"] > off["step"]["tokens"]
+    reply = {
+        "overview": "a gradient",
+        "image_type": "other",
+        "findings": [],
+        "visual_observations": [
+            {"text": "bright corner", "box": [0, 0, 500, 500], "confidence": "high"},
+            {"text": "bad box", "box": [900, 0, 100, 50], "confidence": "low"},
+        ],
+    }
+    done = json.loads(bridge.ai_next(on["job"], json.dumps(reply)))
+    saved = json.loads(done["json"])["ai"]
+    assert saved["kind"] == "image" and saved["saw_image"] and saved["preview"]
+    assert [o["box"] for o in saved["visual_observations"]] == [[0, 0, 500, 500], None]
+    assert saved["verification"]["visual"] == 2
+    assert "<rect" in done["panel"] and done["panel"].count("<rect") == 1

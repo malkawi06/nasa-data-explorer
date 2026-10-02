@@ -112,6 +112,18 @@ The AI layer is configured with environment variables or a `.env` file (gitignor
   the tool prints the estimated token count, and responses are cached on disk in
   `~/.cache/nasa_explorer/ai`, so the same input is never sent twice.
 - For data files, only the computed summary and statistics are sent, never the raw file.
+- **Images (opt-in):** `--ai-images` (or `AI_SEND_IMAGES=1`) also sends a downscaled 1024 px
+  JPEG of a plain image to Gemini or Anthropic, so the model can see it. Without it the model
+  sees only the measurements below.
+
+### Images
+- Every plain image gets **measurements computed by code**: brightness, contrast, clipping,
+  saturation, colourfulness, sharpness, edge density, dominant colours, and the share of
+  white unsaturated pixels (cloud, snow or background), green-dominant and blue-dominant pixels.
+  EXIF capture time and GPS position are read when present.
+- With vision on, each thing the model says it sees is listed under *What the AI sees*, with a
+  numbered box drawn on the image. These are badged 👁 *visual, not machine-checked*. Numbers
+  must still cite a measurement (`image.white_low_saturation_pct`) and are verified.
 
 ### Verified AI output
 - **Its own place in every report:** the AI analysis is a highlighted panel at the top. Without
@@ -186,6 +198,7 @@ Then open http://localhost:8000.
   - Ollama on your own machine: start it with `OLLAMA_ORIGINS=https://your-site.netlify.app`.
 - The key stays in your browser. It is kept for the session only, unless you tick "remember",
   and it is sent only to that provider. There is no server.
+- *Send images* (off by default) lets Gemini or Claude see a downscaled copy of an image file.
 - Each report card has three tabs:
   - **Report**
   - **🤖 AI analysis**: verified findings with badges. The downloadable report includes them.

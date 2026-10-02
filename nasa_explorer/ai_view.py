@@ -22,9 +22,17 @@ CSS = """
 .qlist{list-style:none;padding:0;margin:0}.qlist li{padding:5px 0;border-bottom:1px solid var(--line)}
 .qlist li:last-child{border:0}
 .sev{font-size:11px;color:var(--muted);margin-inline-start:6px}
+.b-visual{color:#2a5bd7;border-color:#6d95f0}
+@media (prefers-color-scheme:dark){.b-visual{color:#9db8ff}}
+.seen{position:relative;display:inline-block;max-width:100%;margin:6px 0}
+.seen img{display:block;max-width:100%;border-radius:6px}
+.seen svg{position:absolute;inset:0;width:100%;height:100%}
+.seen rect{fill:none;stroke:#ffd400;stroke-width:4;vector-effect:non-scaling-stroke}
+.seen text{fill:#ffd400;font:bold 44px sans-serif;paint-order:stroke;stroke:#000;stroke-width:8px}
+.box-no{font-weight:700;color:#b38f00;margin-inline-end:4px}
 """
 
-SYMBOL = {"verified": "✓", "mismatch": "✗", "unsupported": "?", "qualitative": "·"}
+SYMBOL = {"verified": "✓", "mismatch": "✗", "unsupported": "?", "qualitative": "·", "visual": "👁"}
 LEVEL = {"error": "⛔", "warning": "⚠", "info": "ℹ"}
 
 
@@ -69,6 +77,29 @@ def _items(title: str, items, L: dict) -> str:
     return f"<h3>{_e(title)}</h3><ul>{''.join(lis)}</ul>"
 
 
+def _seen(ai: dict, L: dict) -> str:
+    """The image the model saw, with a numbered rectangle for each observation that has a box."""
+    items = ai.get("visual_observations") or []
+    boxes = [(n, it["box"]) for n, it in enumerate(items, 1) if it.get("box")]
+    lis = "".join(
+        f"<li>{f'<span class=box-no>[{n}]</span>' if it.get('box') else ''}{_e(it.get('text', ''))}"
+        f"<span class='sev'>[{_e(it.get('confidence', ''))}]</span>{_badge(it, L)}</li>"
+        for n, it in enumerate(items, 1)
+    )
+    figure = ""
+    if ai.get("preview") and boxes:
+        rects = "".join(
+            f"<rect x='{x0}' y='{y0}' width='{x1 - x0}' height='{y1 - y0}'/>"
+            f"<text x='{x0 + 8}' y='{y0 + 46}'>{n}</text>"
+            for n, (y0, x0, y1, x1) in boxes
+        )
+        figure = (
+            f"<div class='seen'><img alt='' src='data:image/jpeg;base64,{ai['preview']}'>"
+            f"<svg viewBox='0 0 1000 1000' preserveAspectRatio='none' aria-hidden='true'>{rects}</svg></div>"
+        )
+    return f"<h3>{_e(L['visual_observations'])}</h3>{figure}<ul>{lis}</ul>" if items else ""
+
+
 def _chips(ai: dict, L: dict) -> str:
     v = ai.get("verification") or {}
     chips = [
@@ -103,6 +134,16 @@ def render_ai(ai: dict | None, lang: str) -> str:
         return "".join(out) + "</section>"
     if ai.get("overview"):
         out.append(f"<h3>{_e(L['overview'])}</h3><p>{_e(ai['overview'])}</p>")
+    if ai.get("kind") == "image":
+        if ai.get("image_type"):
+            out.append(f"<p><b>{_e(L['image_type'])}:</b> {_e(ai['image_type'])}</p>")
+        if not ai.get("saw_image"):
+            out.append(f"<p class='meta'>{_e(L['vision_off'])}</p>")
+        out.append(_items(L["findings"], ai.get("findings"), L))
+        out.append(_seen(ai, L))
+        for key in ("quality_issues", "next_analyses", "hackathon_ideas", "caveats"):
+            out.append(_items(L[key], ai.get(key), L))
+        return "".join(out) + "</section>"
     keys = (
         (
             "problem",

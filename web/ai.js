@@ -1,6 +1,7 @@
 // Bring-your-own-key AI calls made directly from the browser to the chosen provider.
 // The key never reaches any server of ours (there is none). Only prompts built by
-// web/bridge.py are sent: computed summaries and statistics, never the uploaded file.
+// web/bridge.py are sent: computed summaries and statistics, never the uploaded file - except a
+// downscaled copy of a plain image when the user turns on "Send images" (vision providers only).
 
 export const PROVIDERS = {
   gemini: { label: "Google Gemini (free tier)", model: "gemini-3.8-flash", key: true, keyUrl: "https://aistudio.google.com/apikey" },
@@ -81,7 +82,7 @@ class ProviderError extends Error {
   }
 }
 
-function request(s, { system, prompt, json }) {
+function request(s, { system, prompt, json, image }) {
   const model = modelOf(s);
   switch (s.provider) {
     case "gemini":
@@ -90,7 +91,8 @@ function request(s, { system, prompt, json }) {
         headers: { "content-type": "application/json", "x-goog-api-key": s.key.trim() },
         body: {
           systemInstruction: { parts: [{ text: system }] },
-          contents: [{ role: "user", parts: [{ text: prompt }] }],
+          contents: [{ role: "user", parts: [
+            ...(image ? [{ inlineData: { mimeType: "image/jpeg", data: image } }] : []), { text: prompt }] }],
           generationConfig: { temperature: 0.2, ...(json ? { responseMimeType: "application/json" } : {}) },
         },
         read: (d) => (d.candidates?.[0]?.content?.parts || []).map((p) => p.text || "").join(""),
@@ -115,7 +117,12 @@ function request(s, { system, prompt, json }) {
           "anthropic-version": "2023-06-01",
           "anthropic-dangerous-direct-browser-access": "true",
         },
-        body: { model, max_tokens: 4096, system, messages: [{ role: "user", content: prompt }] },
+        body: {
+          model, max_tokens: 4096, system,
+          messages: [{ role: "user", content: image
+            ? [{ type: "image", source: { type: "base64", media_type: "image/jpeg", data: image } }, { type: "text", text: prompt }]
+            : prompt }],
+        },
         read: (d) => (d.content || []).filter((b) => b.type === "text").map((b) => b.text).join(""),
       };
     case "ollama":
@@ -166,7 +173,7 @@ async function callOnceWithModelFallback(s, step) {
 
 /** One model call with an on-device cache and backoff for free-tier rate limits (429). */
 export async function complete(s, step, onWait = () => {}) {
-  const id = CACHE + (await sha256([s.provider, modelOf(s), step.json, step.system, step.prompt].join("|")));
+  const id = CACHE + (await sha256([s.provider, modelOf(s), step.json, step.system, step.prompt, step.image || ""].join("|")));
   const cached = storage("localStorage")?.getItem(id);
   if (cached !== null && cached !== undefined) return cached;
   let delay = 2;

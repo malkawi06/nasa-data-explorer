@@ -62,4 +62,7 @@ Generic "drop any NASA/scientific file in, get a report" tool for Space Apps hac
   share a cache dir, so give each run its own `model`.
 - AI prompts ask for JSON. Keep keys stable (`findings[].fact/value`, `page`/`quote`),
   because `verify.py`, `ai_view.py` and `evals/score.py` depend on them.
+- Sending file content to a provider is opt-in only (`AI_SEND_IMAGES=1` / `--ai-images`, the web
+  "Send images" box) and only for `ai.VISION` providers. `Step.image` carries it; keep the default
+  path summary-only.
 - Tests force `NASA_EXPLORER_EMBEDDINGS=tfidf` and clear AI keys; AI is tested with a fake provider.

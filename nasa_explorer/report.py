@@ -50,6 +50,7 @@ th,td{border-bottom:1px solid var(--line);padding:4px 8px;text-align:start;verti
 th{color:var(--ink2);font-weight:600;background:transparent}
 td.num{text-align:end}
 img.plot{max-width:100%;border-radius:6px;border:1px solid var(--line)}
+.swatch{display:inline-block;width:11px;height:11px;border-radius:3px;border:1px solid var(--line);vertical-align:-1px;margin-inline-end:5px}
 .notes li{color:var(--ink2)}.pill{display:inline-block;padding:1px 8px;border-radius:10px;border:1px solid var(--line);font-size:12px;color:var(--ink2);margin:2px}
 .trend{font-weight:600}.ai{white-space:normal}.ai pre{white-space:pre-wrap}
 pre.preview{white-space:pre-wrap;font-size:12px;color:var(--ink2);max-height:320px;overflow:auto}
@@ -290,6 +291,19 @@ def _patterns(a: dict, L: dict) -> str:
     return "".join(out)
 
 
+def _measurements(m: dict, L: dict) -> str:
+    swatches = "".join(
+        f"<span class='pill'><span class='swatch' style='background:{html.escape(c)}'></span>"
+        f"<bdi dir='ltr'>{html.escape(c)} · {p:g}%</bdi></span>"
+        for c, p in m.get("dominant_colours", {}).items()
+    )
+    rest = {k: v for k, v in m.items() if k != "dominant_colours"}
+    return (
+        f"<div class='card'><b>{L['colours']}</b><div class='chips'>{swatches}</div></div>"
+        f"<div class='card'>{to_html(rest)}</div>"
+    )
+
+
 def render_body(rep: dict, plots: list[tuple[str, str, bytes]], lang: str) -> str:
     L = labels(lang)
     a = rep["analysis"]
@@ -318,6 +332,14 @@ def render_body(rep: dict, plots: list[tuple[str, str, bytes]], lang: str) -> st
     patterns = _patterns(a, L)
     if patterns:
         sections.append(("patterns", L["patterns"], _section("patterns", L["patterns"], patterns)))
+    if a.get("image"):
+        sections.append(
+            (
+                "measurements",
+                L["measurements"],
+                _section("measurements", L["measurements"], _measurements(a["image"], L)),
+            )
+        )
     if plots:
         figs = "".join(
             f"<figure class='card fig'><figcaption>{html.escape(title)}</figcaption><img class='plot' "

@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import argparse
 import logging
+import os
 import subprocess
 import sys
 import warnings
@@ -35,6 +36,12 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--lang", choices=("en", "ar"), default="en", help="report / AI language")
     p.add_argument(
         "--ai", action="store_true", help="add AI summaries (needs Ollama or an API key)"
+    )
+    p.add_argument(
+        "--ai-images",
+        action="store_true",
+        help="with --ai: also send a downscaled copy of plain images to the provider "
+        "(Gemini/Anthropic) for a visual analysis",
     )
     p.add_argument("--ask", metavar="QUESTION", help="Q&A over everything processed in --out")
     p.add_argument("--no-plots", action="store_true", help="skip plots (faster)")
@@ -82,6 +89,8 @@ def main(argv: list[str] | None = None) -> int:
     )
     if args.path:
         try:
+            if args.ai_images:
+                os.environ["AI_SEND_IMAGES"] = "1"
             reports = process(args.path, opts, args.out, ai=args.ai, reuse=bool(args.ask))
         except FileNotFoundError as exc:
             print(f"error: not found: {exc}", file=sys.stderr)

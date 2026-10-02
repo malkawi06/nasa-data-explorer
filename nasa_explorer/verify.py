@@ -77,7 +77,7 @@ def facts(analysis: dict) -> dict[str, Any]:
         _flatten(f"trends.{t['variable']}", brief, out)
     if analysis.get("trend_map"):
         _flatten("trend_map", analysis["trend_map"], out)
-    for key in ("events", "correlations", "categories"):
+    for key in ("events", "correlations", "categories", "image"):
         if analysis.get(key):
             _flatten(key, analysis[key], out)
     for name, st in analysis.get("statistics", {}).items():
@@ -299,6 +299,25 @@ def _check_paper_claim(item: dict, pages: list[str]) -> tuple[str, str]:
     if not [r for r, v in nums if not any(close(r, v, pv) for pv in near_vals)]:
         return "verified", f"numbers found next to p. {page} (page cited off by one)"
     return "unsupported", f"{', '.join(missing)} not found on p. {page}"
+
+
+def mark_visual(result: dict) -> dict:
+    """Visual observations cannot be checked by code: label them, keep only well-formed boxes."""
+    items = [i for i in result.get("visual_observations") or [] if isinstance(i, dict)]
+    for item in items:
+        box = item.get("box")
+        ok = (
+            isinstance(box, list)
+            and len(box) == 4
+            and all(isinstance(v, int | float) and 0 <= v <= 1000 for v in box)
+            and box[0] < box[2]
+            and box[1] < box[3]
+        )
+        item["box"] = [round(float(v)) for v in box] if ok else None
+        item["status"], item["note"] = "visual", "seen by the model; not checked by code"
+    result["visual_observations"] = items
+    result.setdefault("verification", {})["visual"] = len(items)
+    return result
 
 
 def review_problems(result: dict) -> list[str]:

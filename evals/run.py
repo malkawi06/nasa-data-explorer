@@ -40,7 +40,9 @@ def run(
             rep = process_file(case.path, opts, Path(tmp) / "reports")
             res, _, _ = read_file(case.path, opts)
             start, sent = time.time(), client.tokens_sent
-            result = ai.run_workflow(ai.workflow_for(rep, res, lang), client)
+            result = ai.run_workflow(
+                ai.workflow_for(rep, res, lang, client.provider.name in ai.VISION), client
+            )
             row = score(result, case)
             row.update(seconds=round(time.time() - start, 1), tokens=client.tokens_sent - sent)
             rows.append(row)

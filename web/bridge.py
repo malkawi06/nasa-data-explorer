@@ -117,24 +117,34 @@ def _step(job: str, step: ai.Step) -> str:
                 "prompt": step.prompt,
                 "json": step.json_mode,
                 "tokens": step.tokens,
+                "image": step.image,
             },
         }
     )
 
 
-def ai_start(key: str, lang: str, provider: str, model: str) -> str:
-    """Begin the verified analysis of one report; returns the first prompt to send."""
+def ai_start(key: str, lang: str, provider: str, model: str, send_image: bool = False) -> str:
+    """Begin the verified analysis of one report; returns the first prompt to send.
+    `send_image` (opt-in) lets a vision-capable provider see a downscaled copy of an image."""
     rep, payload, _ = _REPORTS[key]
+    image = ai.vision_image(rep) if send_image and provider in ai.VISION else None
     if rep.kind == "document":
         flow = ai.paper_workflow(
             _pages(rep), payload["analysis"]["summary"].get("title") or rep.file, lang
         )
     else:
-        flow = ai.data_workflow(rep.analysis, rep.file, rep.reader, lang)
+        flow = ai.data_workflow(rep.analysis, rep.file, rep.reader, lang, image)
     job = f"ai:{key}"
     _JOBS[job] = (
         flow,
-        {"key": key, "lang": lang, "provider": provider, "model": model, "kind": "analysis"},
+        {
+            "key": key,
+            "lang": lang,
+            "provider": provider,
+            "model": model,
+            "kind": "analysis",
+            "source": rep.source,
+        },
     )
     return _step(job, next(flow))
 
@@ -159,6 +169,10 @@ def ai_next(job: str, reply: str) -> str:
     if ctx["kind"] == "chat":
         return json.dumps({"job": job, "done": True, "answer": result["answer"]})
     rep, payload, opts = _REPORTS[ctx["key"]]
+    if result.get("saw_image"):
+        from nasa_explorer.analysis.image_metrics import jpeg_b64
+
+        result["preview"] = jpeg_b64(ctx["source"], ai.PREVIEW_SIDE)
     payload["ai"] = {"provider": ctx["provider"], "model": ctx["model"], **result}
     rep.json_path.write_text(report.dumps(payload), encoding="utf-8")
     page = report.page(

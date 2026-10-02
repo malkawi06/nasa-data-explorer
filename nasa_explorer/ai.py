@@ -2,11 +2,13 @@
 
 Provider is chosen by env AI_PROVIDER (ollama | gemini | groq | anthropic); if unset, the
 first configured one wins in that order. AI_MODEL overrides the default model.
-Only computed summaries are ever sent for data files - never the raw file.
+Only computed summaries are ever sent for data files - never the raw file. The one exception is
+opt-in: with AI_SEND_IMAGES=1 a downscaled copy of a plain image goes to a vision-capable provider.
 """
 
 from __future__ import annotations
 
+import base64
 import hashlib
 import json
 import logging
@@ -37,6 +39,9 @@ except ImportError:
 CHUNK_TOKENS = 6000
 MAX_RETRIES = 6
 TIMEOUT = 180
+VISION = {"gemini", "anthropic"}  # providers whose default models accept images
+IMAGE_TOKENS = 1500  # rough cost of one 1024 px image
+PREVIEW_SIDE = 480  # small copy stored with the result so the report can draw the boxes
 
 
 class AIUnavailable(RuntimeError):
@@ -53,7 +58,9 @@ class Provider(Protocol):
     name: str
     model: str
 
-    def complete(self, prompt: str, system: str, json_mode: bool = False) -> str: ...
+    def complete(
+        self, prompt: str, system: str, json_mode: bool = False, image: str | None = None
+    ) -> str: ...
 
 
 def estimate_tokens(text: str) -> int:
@@ -141,11 +148,13 @@ class Gemini:
         flash.sort(key=lambda n: (-float(re.match(r"gemini-([\d.]+)-", n).group(1)), len(n)))
         return flash[0] if flash else None
 
-    def complete(self, prompt: str, system: str, json_mode: bool = False) -> str:
+    def complete(
+        self, prompt: str, system: str, json_mode: bool = False, image: str | None = None
+    ) -> str:
         from google.genai import errors
 
         try:
-            return self._generate(prompt, system, json_mode)
+            return self._generate(prompt, system, json_mode, image)
         except errors.APIError as exc:
             if getattr(exc, "code", None) != 404:
                 raise
@@ -154,15 +163,20 @@ class Gemini:
                 raise
             log.warning("Gemini model %s is unavailable; switching to %s", self.model, replacement)
             self.model = replacement
-            return self._generate(prompt, system, json_mode)
+            return self._generate(prompt, system, json_mode, image)
 
-    def _generate(self, prompt: str, system: str, json_mode: bool) -> str:
+    def _generate(self, prompt: str, system: str, json_mode: bool, image: str | None) -> str:
         from google.genai import errors, types
 
+        contents = (
+            [types.Part.from_bytes(data=base64.b64decode(image), mime_type="image/jpeg"), prompt]
+            if image
+            else prompt
+        )
         try:
             resp = self.client.models.generate_content(
                 model=self.model,
-                contents=prompt,
+                contents=contents,
                 config=types.GenerateContentConfig(
                     system_instruction=system,
                     temperature=0.2,
@@ -212,15 +226,26 @@ class Anthropic:
         self.client = anthropic.Anthropic(max_retries=0)  # we do our own backoff
         self.model = model or "claude-sonnet-5-5"
 
-    def complete(self, prompt: str, system: str, json_mode: bool = False) -> str:
+    def complete(
+        self, prompt: str, system: str, json_mode: bool = False, image: str | None = None
+    ) -> str:
         import anthropic
 
+        content: str | list = prompt
+        if image:
+            content = [
+                {
+                    "type": "image",
+                    "source": {"type": "base64", "media_type": "image/jpeg", "data": image},
+                },
+                {"type": "text", "text": prompt},
+            ]
         try:
             msg = self.client.messages.create(
                 model=self.model,
                 max_tokens=4096,
                 system=system,
-                messages=[{"role": "user", "content": prompt}],
+                messages=[{"role": "user", "content": content}],
             )
         except anthropic.RateLimitError as exc:
             ra = exc.response.headers.get("retry-after") if exc.response is not None else None
@@ -279,19 +304,24 @@ class AIClient:
         self.verbose = verbose
         self.tokens_sent = 0
 
-    def ask(self, prompt: str, system: str = "", json_mode: bool = False) -> str:
+    def ask(
+        self, prompt: str, system: str = "", json_mode: bool = False, image: str | None = None
+    ) -> str:
         key = hashlib.sha256(
-            f"{self.provider.name}|{self.provider.model}|{json_mode}|{system}|{prompt}".encode()
+            f"{self.provider.name}|{self.provider.model}|{json_mode}|{system}|{prompt}|{image or ''}".encode()
         ).hexdigest()
         path = cache_dir() / f"{key}.json"
         if path.exists():
             if self.verbose:
                 print(f"  [ai] cache hit ({self.provider.name}/{self.provider.model})")
             return json.loads(path.read_text(encoding="utf-8"))["text"]
-        est = estimate_tokens(system + prompt)
+        est = estimate_tokens(system + prompt) + (IMAGE_TOKENS if image else 0)
         if self.verbose:
             print(f"  [ai] {self.provider.name}/{self.provider.model}: ~{est:,} input tokens")
-        text = self._with_backoff(lambda: self.provider.complete(prompt, system, json_mode))
+        extra = {"image": image} if image else {}
+        text = self._with_backoff(
+            lambda: self.provider.complete(prompt, system, json_mode, **extra)
+        )
         self.tokens_sent += est
         path.write_text(
             json.dumps(
@@ -329,10 +359,11 @@ class Step:
     system: str
     prompt: str
     json_mode: bool = True
+    image: str | None = None  # base64 JPEG, only for opt-in visual analysis
 
     @property
     def tokens(self) -> int:
-        return estimate_tokens(self.system + self.prompt)
+        return estimate_tokens(self.system + self.prompt) + (IMAGE_TOKENS if self.image else 0)
 
 
 Workflow = Generator[Step, str, dict]
@@ -361,6 +392,36 @@ DATA_SCHEMA = """{
   "hackathon_ideas": ["idea that uses this data"],
   "caveats": ["limitation of the data or of these statistics"]
 }"""
+
+
+IMAGE_SCHEMA = """{
+  "overview": "2-4 sentences: what the image shows and what it could be used for",
+  "image_type": "satellite true-colour | satellite false-colour | chart/plot | map | astronomy | photo | diagram | other",
+  "findings": [{"text": "insight backed by a measurement", "value": <number or null>, "fact": "<exact fact path or null>"}],
+  "visual_observations": [{"text": "one thing visible in the image", "box": [ymin, xmin, ymax, xmax] or null, "confidence": "high|medium|low"}],
+  "quality_issues": [{"text": "problem and why it matters", "severity": "high|medium|low"}],
+  "next_analyses": ["concrete analysis to run next"],
+  "hackathon_ideas": ["idea that uses this image"],
+  "caveats": ["limitation of the image or of these measurements"]
+}"""
+
+IMAGE_RULES = {
+    True: (
+        "You can see the image. Put every claim about its content in visual_observations, each "
+        "with a box (0-1000 coordinates, [ymin, xmin, ymax, xmax]) around the region it describes, "
+        "or null for the whole image. Describe only what is visible: do not name places, dates, "
+        "instruments or missions unless they are written in the image or given in the metadata. "
+        "For a chart, read its title, axes and units and describe the shape; any value read off a "
+        "chart is an estimate and must say so. Findings are for the measured FACTS only "
+        "(e.g. image.white_low_saturation_pct is white, unsaturated pixels: cloud, snow or a white "
+        "background - say which, from what you see)."
+    ),
+    False: (
+        "You cannot see the image, only the measurements below; do not describe its content "
+        "beyond what they imply and leave visual_observations empty. Explain what the "
+        "measurements suggest (type of image, exposure, sharpness, colour make-up) with care."
+    ),
+}
 
 
 def _data_context(analysis: dict, file: str, reader: str) -> tuple[str, dict]:
@@ -397,11 +458,15 @@ NOTES: {"; ".join(analysis.get("notes", [])) or "none"}"""
     return context, f
 
 
-def data_workflow(analysis: dict, file: str, reader: str, lang: str) -> Workflow:
-    """Draft -> verify every number against the facts -> one review round if needed."""
+def data_workflow(
+    analysis: dict, file: str, reader: str, lang: str, image: str | None = None
+) -> Workflow:
+    """Draft -> verify every number against the facts -> one review round if needed.
+    Plain images get their own schema; `image` (base64 JPEG) lets the model see the picture."""
     from . import verify
 
     context, f = _data_context(analysis, file, reader)
+    is_image = "image" in analysis
     rules = (
         "Rules: only the summary below was computed - you never see the raw data. Every finding that "
         'contains a number MUST set "fact" to one exact path from FACTS and "value" to that number. '
@@ -414,10 +479,17 @@ def data_workflow(analysis: dict, file: str, reader: str, lang: str) -> Workflow
         "(significant only when its mk_p < 0.05); never present a non-significant slope as a trend. "
         "Reflect the automatic quality checks and product notes in quality_issues/caveats."
     )
+    if is_image:
+        rules = (
+            'Rules: every finding that contains a number MUST set "fact" to one exact path from '
+            'FACTS and "value" to that number. ' + IMAGE_RULES[image is not None]
+        )
+    schema = IMAGE_SCHEMA if is_image else DATA_SCHEMA
     raw = yield Step(
         "draft",
         SYSTEM,
-        f"{context}\n\n{rules}\nReturn ONLY JSON with this shape:\n{DATA_SCHEMA}\n{_lang_rule(lang)}",
+        f"{context}\n\n{rules}\nReturn ONLY JSON with this shape:\n{schema}\n{_lang_rule(lang)}",
+        image=image,
     )
     result = verify.parse_json(raw)
     if result is None:
@@ -436,12 +508,16 @@ def data_workflow(analysis: dict, file: str, reader: str, lang: str) -> Workflow
                 + "\n\nReturn the corrected full JSON (same shape). Fix or drop each flagged claim; "
                 f"cite exact FACTS paths. {_lang_rule(lang)}"
             ),
+            image=image,
         )
         fixed = verify.parse_json(fix)
         if fixed is not None:
             result, rounds = verify.verify_data(fixed, f), 2
             result["fixed_in_review"] = len(problems) - len(verify.review_problems(result))
-    result.update(kind="data", rounds=rounds)
+    if is_image:
+        verify.mark_visual(result)
+        result.update(saw_image=image is not None)
+    result.update(kind="image" if is_image else "data", rounds=rounds)
     return result
 
 
@@ -548,22 +624,35 @@ def run_workflow(workflow: Workflow, client: AIClient) -> dict:
         while True:
             if client.verbose:
                 print(f"  [ai] step: {step.label}")
-            step = workflow.send(client.ask(step.prompt, step.system, step.json_mode))
+            step = workflow.send(client.ask(step.prompt, step.system, step.json_mode, step.image))
     except StopIteration as done:
         return done.value
 
 
-def workflow_for(rep: FileReport, res: ReadResult, lang: str) -> Workflow:
+def workflow_for(rep: FileReport, res: ReadResult, lang: str, send_image: bool = False) -> Workflow:
     if res.kind == "document":
         return paper_workflow(res.pages, res.metadata.get("title") or rep.file, lang)
-    return data_workflow(rep.analysis, rep.file, rep.reader, lang)
+    image = vision_image(rep) if send_image else None
+    return data_workflow(rep.analysis, rep.file, rep.reader, lang, image)
+
+
+def vision_image(rep: FileReport) -> str | None:
+    """Downscaled JPEG of a plain image for a vision model (None for anything else)."""
+    from .analysis.image_metrics import jpeg_b64
+
+    return jpeg_b64(rep.source) if "image" in rep.analysis else None
 
 
 def interpret(rep: FileReport, res: ReadResult, lang: str) -> dict | None:
     """Called by the pipeline with --ai. Never raises: AI problems become a note."""
     try:
         client = AIClient()
-        result = run_workflow(workflow_for(rep, res, lang), client)
+        send = os.environ.get("AI_SEND_IMAGES") == "1" and client.provider.name in VISION
+        result = run_workflow(workflow_for(rep, res, lang, send), client)
+        if result.get("saw_image"):
+            from .analysis.image_metrics import jpeg_b64
+
+            result["preview"] = jpeg_b64(rep.source, PREVIEW_SIDE)
         return {"provider": client.provider.name, "model": client.provider.model, **result}
     except Exception as exc:
         rep.analysis.setdefault("notes", []).append(f"AI layer skipped: {exc}")

@@ -67,6 +67,20 @@ def build_cases(d: Path) -> list[Case]:
         }
     ).to_csv(d / "fires_events.csv", index=False)
 
+    from PIL import Image
+
+    y, x = np.mgrid[:600, :900]
+    scene = np.empty((600, 900, 3))
+    scene[:] = (20, 60, 120)  # ocean
+    land = (x - 600) ** 2 / 250**2 + (y - 320) ** 2 / 200**2 < 1
+    scene[land] = (70, 120, 50)  # vegetation
+    scene[land & (x > 650)] = (150, 120, 80)  # bare, dry ground
+    scene[
+        ((x - 250) ** 2 + (y - 180) ** 2 < 110**2) | ((x - 330) ** 2 + (y - 230) ** 2 < 80**2)
+    ] = 242
+    scene += rng.normal(0, 6, scene.shape)
+    Image.fromarray(np.clip(scene, 0, 255).astype(np.uint8)).save(d / "cloudy_scene.jpg")
+
     grid = xr.open_dataset(samples["netcdf4"][0]).load()
     grid["t2m"].values[:, :2, :2] = -9999.0  # fill value nobody declared
     grid.to_netcdf(d / "planted_fill.nc")
@@ -108,6 +122,13 @@ def build_cases(d: Path) -> list[Case]:
             [],
             [("august", "july", "summer"), ("hotspot", "cluster", "concentrat", "region")],
             ["significant increase", "significantly increasing"],
+        ),
+        Case(
+            "cloudy_scene",
+            d / "cloudy_scene.jpg",
+            "clouds over ocean beside green and brown land (~9% cloud); needs a vision provider",
+            ["image.white_low_saturation_pct"],
+            [("cloud",), ("ocean", "water", "sea"), ("vegetat", "green")],
         ),
         Case(
             "paper",

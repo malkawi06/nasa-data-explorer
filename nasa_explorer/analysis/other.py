@@ -11,6 +11,7 @@ import numpy as np
 from .. import plots
 from ..core import ReadOptions, ReadResult
 from ..readers._cf import clean_attrs, decode
+from . import image_metrics
 from .stats import MAX_SAMPLE, numeric_stats
 
 STOP = set(
@@ -135,6 +136,7 @@ def analyze_image(res: ReadResult, opts: ReadOptions):
         "summary": summary,
         "coverage": {},
         "statistics": stats,
+        "image": image_metrics.measure(arr),
         "trends": [],
         "notes": [],
     }, figs

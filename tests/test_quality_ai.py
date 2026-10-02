@@ -306,3 +306,37 @@ def test_event_table_reports_counts_peak_month_and_hotspots(tmp_path):
     titles = [t for t, _, _ in rep.plots]
     assert "Seasonal cycle of events" in titles and "Time series (mean per date)" not in titles
     assert "events.peak_month_share_pct" in verify.facts(rep.analysis)
+
+
+def test_image_measurements_and_exif_gps(tmp_path):
+    from PIL import Image
+
+    arr = np.zeros((100, 200, 3), np.uint8)
+    arr[:, :100] = 245  # white, unsaturated: cloud-like or background
+    arr[:, 100:] = (30, 160, 40)  # green-dominant
+    exif = Image.Exif()
+    gps = exif.get_ifd(0x8825)
+    gps.update({1: "N", 2: (31.0, 57.0, 0.0), 3: "E", 4: (35.0, 55.0, 30.0)})
+    Image.fromarray(arr).save(tmp_path / "scene.jpg", exif=exif, quality=95)
+    rep = process_file(tmp_path / "scene.jpg", ReadOptions(plots=False), tmp_path / "r")
+    m = rep.analysis["image"]
+    assert m["white_low_saturation_pct"] == pytest.approx(50, abs=2)
+    assert m["green_dominant_pct"] == pytest.approx(50, abs=2)
+    assert len(m["dominant_colours"]) == 2
+    assert rep.analysis["summary"]["gps"] == {"lat": 31.95, "lon": pytest.approx(35.925, abs=1e-4)}
+    assert "image.green_dominant_pct" in verify.facts(rep.analysis)
+    flow = ai.data_workflow(rep.analysis, rep.file, rep.reader, "en")
+    step = next(flow)
+    assert step.image is None and "cannot see the image" in step.prompt
+    reply = {
+        "overview": "x",
+        "findings": [
+            {"text": "half is green, 50%", "value": 50, "fact": "image.green_dominant_pct"}
+        ],
+    }
+    try:
+        flow.send(json.dumps(reply))
+    except StopIteration as done:
+        result = done.value
+    assert result["kind"] == "image" and not result["saw_image"]
+    assert result["findings"][0]["status"] == "verified"

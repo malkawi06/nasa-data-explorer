@@ -32,7 +32,7 @@ const T = {
     needKey: "Choose a provider and paste an API key in “AI settings” first (Gemini and Groq have free tiers).",
     aiStep: (x) => `${x.label}: sending ~${x.tokens.toLocaleString()} tokens to ${x.provider}…`,
     aiWait: (sec) => `Rate limited by the provider; retrying in ${sec}s…`,
-    aiDone: (v) => `Done: ${v.verified || 0} verified, ${v.mismatch || 0} wrong, ${v.unsupported || 0} not verified.`,
+    aiDone: (v) => `Done: ${v.verified || 0} verified, ${v.mismatch || 0} wrong, ${v.unsupported || 0} not verified${v.visual ? `, ${v.visual} visual (not machine-checked)` : ""}.`,
     aiFailed: "AI failed: ",
     askPlaceholder: "e.g. Which months are warmest? Is there a trend?",
     saved: "Saved.",
@@ -68,12 +68,12 @@ const T = {
     needKey: "اختر مزوّداً والصق مفتاح API في «إعدادات الذكاء الاصطناعي» أولاً (Gemini وGroq لديهما خطط مجانية).",
     aiStep: (x) => `${x.label}: إرسال نحو ${x.tokens.toLocaleString()} رمز إلى ${x.provider}…`,
     aiWait: (sec) => `تجاوزنا حدّ المزوّد؛ إعادة المحاولة بعد ${sec} ث…`,
-    aiDone: (v) => `تم: ${v.verified || 0} مؤكَّد، ${v.mismatch || 0} خاطئ، ${v.unsupported || 0} غير مؤكَّد.`,
+    aiDone: (v) => `تم: ${v.verified || 0} مؤكَّد، ${v.mismatch || 0} خاطئ، ${v.unsupported || 0} غير مؤكَّد${v.visual ? `، ${v.visual} بصرية (غير مفحوصة آلياً)` : ""}.`,
     aiFailed: "فشل الذكاء الاصطناعي: ",
     askPlaceholder: "مثلاً: ما أدفأ الأشهر؟ هل يوجد اتجاه؟", askSend: "اسأل",
     saved: "تم الحفظ.", keyNote: "يبقى مفتاحك في هذا المتصفح ويُرسَل فقط إلى المزوّد الذي تختاره.",
     aiSettings: "إعدادات الذكاء الاصطناعي (بمفتاحك الخاص)", provider: "المزوّد", model: "النموذج (اختياري)", apiKey: "مفتاح API",
-    remember: "تذكّر المفتاح على هذا الجهاز", ollamaHost: "عنوان Ollama", save: "حفظ", getKey: "احصل على مفتاح مجاني",
+    remember: "تذكّر المفتاح على هذا الجهاز", sendImages: "أرسل الصور للمزوّد لتحليل بصري (Gemini / Claude فقط؛ الصورة تغادر هذا المتصفح)", ollamaHost: "عنوان Ollama", save: "حفظ", getKey: "احصل على مفتاح مجاني",
     desktop: "هذه الصيغة (GRIB / HDF4) تحتاج مكتبات غير متوفرة في المتصفح. شغّل: pip install \"nasa-data-explorer[grib,hdf4]\" ثم nasa-explore FILE",
     heroTitle: "افهم أي ملف بيانات من ناسا خلال دقائق",
     heroLead: "اسحب ملف NetCDF أو HDF5 أو GeoTIFF أو CSV أو FITS أو Shapefile أو ورقة PDF أو ملف ZIP يجمعها. ستحصل على خرائط واتجاهات وفحوصات جودة وملخص بلغة واضحة.",
@@ -423,7 +423,7 @@ $(".run-ai").onclick = async () => {
   r.ai.running = true;
   $(".run-ai").disabled = true;
   try {
-    const res = await drive(() => rpc("ai_start", r.key, state.lang, s.provider, modelOf(s)), s, show);
+    const res = await drive(() => rpc("ai_start", r.key, state.lang, s.provider, modelOf(s), Boolean(s.sendImages)), s, show);
     r.html = res.html;
     r.json = res.json;
     r.ai.panel = res.panel;
@@ -468,6 +468,7 @@ function initSettings() {
   $("#ai-key").value = s.key || "";
   $("#ai-host").value = s.host || "http://localhost:11434";
   $("#ai-remember").checked = Boolean(s.remember);
+  $("#ai-images").checked = Boolean(s.sendImages);
   const sync = () => {
     const p = PROVIDERS[sel.value];
     $("#ai-model").placeholder = p.model;
@@ -480,7 +481,8 @@ function initSettings() {
   $("#ai-form").addEventListener("submit", (e) => {
     e.preventDefault();
     saveSettings({ provider: sel.value, model: $("#ai-model").value.trim(), key: $("#ai-key").value.trim(),
-      host: $("#ai-host").value.trim() || "http://localhost:11434", remember: $("#ai-remember").checked });
+      host: $("#ai-host").value.trim() || "http://localhost:11434", remember: $("#ai-remember").checked,
+      sendImages: $("#ai-images").checked });
     $("#ai-saved").textContent = t("saved");
     setTimeout(() => { $("#ai-saved").textContent = ""; }, 2500);
   });
