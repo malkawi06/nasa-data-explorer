@@ -168,16 +168,17 @@ The AI layer is configured with environment variables or a `.env` file (gitignor
   `[file, p. N]`. Without one it lists the best passages.
 - Without any provider, everything except the AI text works.
 
-## Web app (Netlify, runs in the browser)
+## Web app (GitHub Pages, runs in the browser)
 
 `web/` is a static site that runs the same `nasa_explorer` package in the visitor's browser with
 [Pyodide](https://pyodide.org). There is no server: files are never uploaded, and hosting is free.
 
-**Deploy:**
-1. Netlify → *Add new site* → *Import an existing project* → pick this GitHub repo.
-2. Keep the defaults; `netlify.toml` already sets them. The build runs
-   `python3 web/build.py` and publishes `web/dist`.
-3. Every push to `main` redeploys.
+**Deploy (GitHub Pages):**
+1. Repo *Settings → Pages → Build and deployment → Source*: choose **GitHub Actions** (once).
+2. Every push to `main` runs `.github/workflows/pages.yml`: `python web/build.py`, then publishes
+   `web/dist` to `https://<user>.github.io/nasa-data-explorer/`.
+
+Any static host works the same way (`netlify.toml` is kept for Netlify).
 
 **Run it locally:**
 ```bash
@@ -195,7 +196,7 @@ Then open http://localhost:8000.
 - Open *AI settings* and pick a provider:
   - Gemini or Groq: both have free tiers.
   - Anthropic.
-  - Ollama on your own machine: start it with `OLLAMA_ORIGINS=https://your-site.netlify.app`.
+  - Ollama on your own machine: start it with `OLLAMA_ORIGINS=https://<user>.github.io`.
 - The key stays in your browser. It is kept for the session only, unless you tick "remember",
   and it is sent only to that provider. There is no server.
 - *Send images* (off by default) lets Gemini or Claude see a downscaled copy of an image file.
