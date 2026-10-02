@@ -98,6 +98,11 @@ import bridge`);
     return bridge.analyse_dir(dir, options, onFile);
   },
 
+  // NASA POWER URLs and the analog finder (the HTTP requests happen on the main thread)
+  power_urls: (...a) => bridge.power_urls(...a),
+  analog_sites: () => bridge.analog_sites(),
+  analog_run: (...a) => bridge.analog_run(...a),
+
   // AI and chat steps (the provider call itself happens on the main thread, see ai.js)
   ai_start: (...a) => bridge.ai_start(...a),
   ai_next: (...a) => bridge.ai_next(...a),

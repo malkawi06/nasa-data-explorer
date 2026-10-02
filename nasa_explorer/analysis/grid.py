@@ -8,8 +8,9 @@ import numpy as np
 import pandas as pd
 import xarray as xr
 
-from .. import plots
+from .. import analog, bodies, plots
 from ..core import ReadOptions, ReadResult
+from . import terrain
 from .stats import MAX_SAMPLE, anomalies, numeric_stats, seasonal_cycle, time_coverage, trend
 
 LAT_NAMES = {"lat", "latitude", "nav_lat", "lats", "xlat", "lat_0", "gridlat_0"}
@@ -119,7 +120,19 @@ def _var_summary(name: str, da: xr.DataArray, stats: dict) -> dict:
     return out
 
 
-def _spatial(ds: xr.Dataset, lat: str | None, lon: str | None, meta: dict) -> dict | None:
+def _geographic_bounds(ds: xr.Dataset, body: str) -> list[float]:
+    """W, S, E, N in degrees on the dataset's own body (never reprojected onto Earth)."""
+    if body == "Earth":
+        return [float(v) for v in ds.rio.transform_bounds("EPSG:4326")]
+    from pyproj import CRS
+
+    geodetic = CRS.from_wkt(ds.rio.crs.to_wkt()).geodetic_crs
+    return [float(v) for v in ds.rio.transform_bounds(geodetic.to_wkt())]
+
+
+def _spatial(
+    ds: xr.Dataset, lat: str | None, lon: str | None, meta: dict, body: str = "Earth"
+) -> dict | None:
     if lat and lon:
         la, lo = ds[lat].values, ds[lon].values
         out = {
@@ -144,8 +157,10 @@ def _spatial(ds: xr.Dataset, lat: str | None, lon: str | None, meta: dict) -> di
                 "bbox_native": [float(v) for v in ds.rio.bounds()],
                 "resolution_native": [abs(float(r)) for r in ds.rio.resolution()],
             }
-            out["bbox"] = [float(v) for v in ds.rio.transform_bounds("EPSG:4326")]
-            out["bbox_order"] = "W, S, E, N (degrees)"
+            if body != "Earth":
+                out["body"] = body
+            out["bbox"] = _geographic_bounds(ds, body)
+            out["bbox_order"] = "W, S, E, N (degrees)" + ("" if body == "Earth" else f" on {body}")
             return out
         except Exception:
             return out if "out" in locals() else None
@@ -284,7 +299,11 @@ def analyze_grid(res: ReadResult, opts: ReadOptions) -> tuple[dict, list[tuple[s
     tindex = _time_index(ds, tname) if tname else None
     if tindex is not None:
         coverage["time"] = time_coverage(tindex)
-    if sp := _spatial(ds, lat, lon, res.metadata):
+    meta = res.metadata
+    body = meta.get("body") or bodies.detect(
+        meta.get("crs_wkt") or meta.get("crs"), str(summary["attributes"])
+    )
+    if sp := _spatial(ds, lat, lon, meta, body):
         coverage["space"] = sp
 
     figs: list[tuple[str, bytes]] = []
@@ -385,7 +404,14 @@ def analyze_grid(res: ReadResult, opts: ReadOptions) -> tuple[dict, list[tuple[s
         figs.insert(
             0, (f"Map: {main} ({when})", plots.grid_map(arr, la, lo, f"{main} - {when}", units))
         )
-    return {
+    relief = None
+    if main and terrain.is_elevation(str(meta.get("file_name", "")), str(main), ds[main]):
+        relief, relief_figs = terrain.analyze(ds, str(main), body, opts.plots)
+        if relief_figs:  # the shaded relief replaces the plain overview map
+            figs[:] = relief_figs + [f for f in figs if not f[0].startswith("Map:")]
+        if relief.get("note"):
+            notes.append(relief["note"])
+    out = {
         "summary": summary,
         "coverage": coverage,
         "statistics": stats,
@@ -393,4 +419,15 @@ def analyze_grid(res: ReadResult, opts: ReadOptions) -> tuple[dict, list[tuple[s
         "notes": notes,
         "main_variable": main,
         "trend_map": trend_map,
-    }, figs
+        "body": body,
+    }
+    if relief:
+        out["terrain"] = relief
+        if body == "Earth":  # terrain half of the analog score; climate comes from POWER
+            feats = analog.terrain_features(relief)
+            out["analog"] = {
+                "features": feats,
+                "scores": analog.score_all(feats),
+                "partial": "terrain",
+            }
+    return out, figs

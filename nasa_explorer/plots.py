@@ -406,6 +406,121 @@ def color_histogram(arr: np.ndarray, bands: list[str], title: str) -> bytes:
     return _png(fig)
 
 
+def relief(z: np.ndarray, shade: np.ndarray, title: str, marks=()) -> bytes:
+    """Elevation coloured on top of a hillshade; `marks` = (row, col, radius_px) circles."""
+    from matplotlib.patches import Circle
+
+    fig, ax = plt.subplots(figsize=(7, 6))
+    ax.grid(False)
+    ax.axis("off")
+    finite = z[np.isfinite(z)]
+    lo, hi = np.percentile(finite, [2, 98]) if finite.size else (0, 1)
+    # low ground dark, high ground light: craters read as holes, not domes
+    im = ax.imshow(z, cmap=SEQ.reversed(), vmin=lo, vmax=hi, interpolation="nearest")
+    ax.imshow(shade, cmap="gray", vmin=0, vmax=1, alpha=0.5, interpolation="nearest")
+    for r, c, rad in marks:
+        ax.add_patch(Circle((c, r), max(rad, 3), fill=False, edgecolor="#eb6834", linewidth=1.4))
+    fig.colorbar(im, ax=ax, shrink=0.75, label="elevation (m)")
+    ax.set_title(title, fontsize=10)
+    return _png(fig)
+
+
+def slope_histogram(slope: np.ndarray, limits, pixel_m: float) -> bytes:
+    s = slope[np.isfinite(slope)]
+    fig, ax = plt.subplots(figsize=(7.5, 3.2))
+    if s.size:
+        ax.hist(
+            np.minimum(s, 60),
+            bins=np.arange(0, 61, 1.0),
+            weights=np.full(s.size, 100.0 / s.size),
+            color=SERIES[0],
+        )
+        top = ax.get_ylim()[1]
+        for i, lim in enumerate(limits):  # staggered so neighbouring labels never overlap
+            ax.axvline(lim, color=INK_2, linewidth=1, linestyle="--")
+            ax.text(
+                lim + 0.4,
+                top * (0.93 - 0.1 * (i % 2)),
+                f"{100 * (s < lim).mean():.0f}% < {lim}°",
+                fontsize=7.5,
+                color=INK_2,
+            )
+        ax.set_xlim(0, min(60, max(30, float(np.percentile(s, 99.5)) + 5)))
+    ax.set_xlabel(f"slope (°) at {pixel_m:,.0f} m baseline")
+    ax.set_ylabel("% of area")
+    ax.set_title("Slope distribution")
+    return _png(fig)
+
+
+def analog_bars(rows: list[dict], title: str) -> bytes:
+    """Horizontal bars: each site's score split into its weighted factor contributions."""
+    rows = rows[:20][::-1]
+    keys = list(
+        dict.fromkeys(f["key"] for r in rows for f in r["factors"] if f.get("score") is not None)
+    )
+    labels = {f["key"]: f["label"] for r in rows for f in r["factors"]}
+    fig, ax = plt.subplots(figsize=(9, 0.45 * len(rows) + 1.6))
+    left = np.zeros(len(rows))
+    for i, key in enumerate(keys):
+        part = []
+        for r in rows:
+            got = sum(f["weight"] for f in r["factors"] if f.get("score") is not None)
+            f = next(
+                (f for f in r["factors"] if f["key"] == key and f.get("score") is not None), None
+            )
+            part.append(0.0 if f is None or not got else f["score"] * f["weight"] / got)
+        ax.barh(
+            range(len(rows)),
+            part,
+            left=left,
+            color=SERIES[i % len(SERIES)],
+            label=labels[key],
+            height=0.7,
+        )
+        left += np.asarray(part)
+    for y, r in enumerate(rows):
+        ax.text(left[y] + 1, y, f"{r['score']}", va="center", fontsize=8, color=INK)
+    ax.set_yticks(range(len(rows)), [r["name"][:42] for r in rows], fontsize=9.5)
+    ax.set_xlim(0, 105)
+    ax.set_xlabel("analog score (0-100), split into factor contributions")
+    ax.legend(
+        frameon=False,
+        fontsize=7.5,
+        ncol=3,
+        loc="upper center",
+        bbox_to_anchor=(0.5, -0.12 - 1.2 / (len(rows) + 3)),
+    )
+    ax.grid(axis="y", visible=False)
+    ax.set_title(title)
+    return _png(fig)
+
+
+def site_map(rows: list[dict], title: str) -> bytes:
+    """World scatter of sites coloured by score; the five best are labelled."""
+    fig, ax = plt.subplots(figsize=(9, 4.6))
+    lon = np.array([r["lon"] for r in rows], dtype="float64")
+    lat = np.array([r["lat"] for r in rows], dtype="float64")
+    val = np.array([r["score"] for r in rows], dtype="float64")
+    sc = ax.scatter(
+        lon, lat, c=val, cmap=SEQ, vmin=0, vmax=100, s=46, edgecolors=INK, linewidths=0.4
+    )
+    for r in sorted(rows, key=lambda r: -r["score"])[:5]:
+        ax.annotate(
+            r["name"].split(",")[0][:28],
+            (r["lon"], r["lat"]),
+            fontsize=7.5,
+            xytext=(4, 4),
+            textcoords="offset points",
+        )
+    fig.colorbar(sc, ax=ax, label="analog score", shrink=0.8)
+    ax.set_xlim(-180, 180)
+    ax.set_ylim(-90, 90)
+    ax.set_xlabel("longitude")
+    ax.set_ylabel("latitude")
+    ax.set_title(title)
+    return _png(fig)
+
+
 def thumbnail(arr: np.ndarray, title: str) -> bytes:
     fig, ax = plt.subplots(figsize=(6, min(9, max(2, 6 * arr.shape[0] / max(arr.shape[1], 1)))))
     ax.grid(False)

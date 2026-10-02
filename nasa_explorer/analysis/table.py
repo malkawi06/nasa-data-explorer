@@ -8,7 +8,7 @@ import re
 import numpy as np
 import pandas as pd
 
-from .. import plots
+from .. import analog, plots
 from ..core import ReadOptions, ReadResult
 from . import events as ev
 from .stats import numeric_stats, seasonal_cycle, time_coverage, trend
@@ -344,4 +344,6 @@ def analyze_table(res: ReadResult, opts: ReadOptions) -> tuple[dict, list[tuple[
     }
     if event_info:
         out["events"] = event_info
+    if feats := analog.table_features(out, res.metadata.get("header_text", "")):
+        out["analog"] = {"features": feats, "scores": analog.score_all(feats)}
     return out, figs

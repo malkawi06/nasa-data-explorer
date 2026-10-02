@@ -240,6 +240,22 @@ def kpi_tiles(rep: dict, L: dict) -> str:
                 L["significant"] if sig else L["not_significant"],
             )
         )
+    if res := (a.get("terrain") or {}).get("at_analysis_resolution"):
+        tiles.append(
+            _tile(
+                L["flat_ground"],
+                f"{res.get('flat_lt10_pct', 0):g}%",
+                L["at_baseline"].format(m=f"{res.get('pixel_m', 0):,.0f}"),
+            )
+        )
+    scores = [
+        (sc["score"], key)
+        for key, sc in (a.get("analog") or {}).get("scores", {}).items()
+        if sc.get("score") is not None
+    ]
+    if scores and not (a.get("analog") or {}).get("partial"):
+        best, key = max(scores)
+        tiles.append(_tile(L["best_match"], f"{best}/100", _target_name(key, L)))
     if e := a.get("events"):
         tiles.append(
             _tile(
@@ -314,6 +330,118 @@ def _measurements(m: dict, L: dict) -> str:
     )
 
 
+def _no_hist(d: dict) -> dict:
+    return {k: v for k, v in d.items() if k != "slope_hist"}
+
+
+def _terrain(t: dict, L: dict) -> str:
+    res = t.get("at_analysis_resolution", {})
+    out = []
+    head = {"body": t.get("body"), "variable": t.get("variable"), "voids_pct": t.get("voids_pct")}
+    if t.get("averaged_from_native_m"):
+        head["native_pixel_m"] = t["averaged_from_native_m"]
+    out.append(
+        f"<div class='card'>{to_html(head)}<h3>{L['elevation']}</h3>{to_html(t.get('elevation_m', {}))}</div>"
+    )
+    if res:
+        where = html.escape(L["at_baseline"].format(m=f"{res.get('pixel_m', 0):,.0f}"))
+        out.append(
+            f"<h3>{L['slope_roughness']} <span class='muted small'>({where})</span></h3>"
+            f"<div class='card'>{to_html(res)}</div>"
+        )
+    if t.get("slope_note"):
+        out.append(f"<p class='muted'>{html.escape(t['slope_note'])}</p>")
+    if prof := t.get("by_baseline_m"):
+        rows = [{"baseline_m": k, **_no_hist(v)} for k, v in prof.items()]
+        out.append(_fold(L["by_baseline"], f"<div class='card'>{to_html(rows)}</div>"))
+    if dep := t.get("depressions"):
+        body = to_html({k: v for k, v in dep.items() if k != "largest"})
+        if dep.get("largest"):
+            body += f"<h3>{L['largest']}</h3>" + to_html(dep["largest"])
+        out.append(f"<h3>{L['depressions']}</h3><div class='card'>{body}</div>")
+    return "".join(out)
+
+
+def _target_name(key: str, L: dict) -> str:
+    from .analog import TARGETS
+
+    return L.get(f"target_{key}", TARGETS[key].name if key in TARGETS else key)
+
+
+def _factor_rows(factors: list[dict], L: dict) -> list[dict]:
+    return [
+        {
+            L["factors"]: L.get(f"f_{f['key']}", f["label"]),
+            "value": "—"
+            if f.get("value") is None
+            else f"{f['value']:g} {f.get('unit', '')}".strip(),
+            "score": "—" if f.get("score") is None else f"{f['score']}/100",
+            "weight": f["weight"],
+            "why": f.get("why", ""),
+        }
+        for f in factors
+    ]
+
+
+def _analog(an: dict, L: dict) -> str:
+    out = []
+    if an.get("partial") == "terrain":
+        out.append(f"<p class='muted'>{html.escape(L['partial_terrain'])}</p>")
+    rows = []
+    for key, sc in an.get("scores", {}).items():
+        rows.append(
+            {
+                "target": _target_name(key, L),
+                L["analog_score"]: "—" if sc["score"] is None else f"{sc['score']}/100",
+                L["data_coverage"]: f"{sc['coverage_pct']}%",
+                L["missing_factors"]: ", ".join(sc.get("missing", [])),
+            }
+        )
+    out.append(f"<div class='card'>{to_html(rows)}</div>")
+    for key, sc in an.get("scores", {}).items():
+        if sc["score"] is not None:
+            out.append(
+                _fold(
+                    _target_name(key, L),
+                    f"<div class='card'>{to_html(_factor_rows(sc['factors'], L))}</div>",
+                )
+            )
+    out.append(f"<p class='muted small'>{html.escape(L['power_cells'])}</p>")
+    return "".join(out)
+
+
+def _ranking(rk: dict, L: dict) -> str:
+    out = [
+        f"<p><b>{html.escape(_target_name(rk['target'], L))}</b>: {html.escape(rk.get('description', ''))}</p>"
+    ]
+    if v := rk.get("validation"):
+        out.append(f"<div class='card'>✔ {html.escape(v['text'])}</div>")
+    rows = [
+        {
+            "#": r["rank"],
+            "site": r["name"],
+            "lat, lon": f"{r['lat']:g}, {r['lon']:g}",
+            "status": (L["known_analog"] + f" ({r['analog_for']})")
+            if r.get("analog_for")
+            else L["candidate"],
+            L["analog_score"]: "—" if r.get("score") is None else f"{r['score']}/100",
+            L["data_coverage"]: f"{r.get('coverage_pct', 0)}%",
+        }
+        for r in rk.get("ranking", [])
+    ]
+    out.append(f"<div class='card'>{to_html(rows)}</div>")
+    for r in rk.get("ranking", [])[:8]:
+        if r.get("factors"):
+            out.append(
+                _fold(
+                    f"{r['rank']}. {r['name']}",
+                    f"<div class='card'>{to_html(_factor_rows(r['factors'], L))}</div>",
+                )
+            )
+    out.append(f"<p class='muted small'>{html.escape(L['power_cells'])}</p>")
+    return "".join(out)
+
+
 def render_body(rep: dict, plots: list[tuple[str, str, bytes]], lang: str) -> str:
     L = labels(lang)
     a = rep["analysis"]
@@ -339,6 +467,30 @@ def render_body(rep: dict, plots: list[tuple[str, str, bytes]], lang: str) -> st
         ]
         body += _fold(L["details"], f"<div class='card'>{to_html(rows)}</div>")
         sections.append(("trends", L["trends"], _section("trends", L["trends"], body)))
+    if a.get("ranking"):
+        sections.append(
+            ("ranking", L["ranking"], _section("ranking", L["ranking"], _ranking(a["ranking"], L)))
+        )
+    if a.get("terrain"):
+        sections.append(
+            ("terrain", L["terrain"], _section("terrain", L["terrain"], _terrain(a["terrain"], L)))
+        )
+    if a.get("terrain_analogs"):
+        sections.append(
+            (
+                "terrain_analogs",
+                L["terrain_analogs"],
+                _section(
+                    "terrain_analogs",
+                    L["terrain_analogs"],
+                    f"<div class='card'>{to_html(a['terrain_analogs'])}</div>",
+                ),
+            )
+        )
+    if a.get("analog"):
+        sections.append(
+            ("analog", L["analog"], _section("analog", L["analog"], _analog(a["analog"], L)))
+        )
     patterns = _patterns(a, L)
     if patterns:
         sections.append(("patterns", L["patterns"], _section("patterns", L["patterns"], patterns)))

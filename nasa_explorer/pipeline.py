@@ -11,10 +11,11 @@ from dataclasses import dataclass, field
 from datetime import datetime
 from pathlib import Path
 
-from . import archives, products, report
+from . import analog, archives, products, report
 from .analysis import analyze
 from .analysis.quality import unreadable
 from .core import ReadOptions, ReadResult
+from .readers.planetary import DATA_EXTS, label_for
 from .readers.zarr_store import is_zarr_dir
 from .registry import read_file, readers
 
@@ -100,6 +101,8 @@ def iter_inputs(folder: Path, out_dir: Path | None = None) -> list[Path]:
             if low.endswith(s)
         ):
             continue
+        if path.suffix.lower() in DATA_EXTS and label_for(path) != path:
+            continue  # PDS data file: its label is processed (and opens the data)
         found.append(path)
     return found
 
@@ -134,6 +137,14 @@ def _headline(kind: str, a: dict) -> str:
         parts.append(
             f"{e['total']:,} events, peak {e['peak_month']} ({e['peak_month_share_pct']:g}%)"
         )
+    elif tr := a.get("terrain"):
+        res, dep = tr.get("at_analysis_resolution", {}), tr.get("depressions", {})
+        bits = [f"{tr.get('body', 'Earth')} DEM"]
+        if res:
+            bits.append(f"{res['flat_lt10_pct']:g}% flat (<10°) at {res['pixel_m']:,.0f} m")
+        if dep.get("count") is not None:
+            bits.append(f"{dep['count']} crater-like depressions")
+        parts.append(", ".join(bits))
     elif a.get("trends"):
         t0 = a["trends"][0]
         parts.append(f"{t0['variable']}: {t0['text'].split(';')[0]}")
@@ -194,6 +205,7 @@ def process_file(
     reader_name = "unknown"
     try:
         res, reader_name, problems = read_file(path, opts)
+        res.metadata.setdefault("file_name", label)
         analysis, figs = analyze(res, opts)
         analysis["products"] = products.identify(label, analysis)
         if res.kind == "binary":
@@ -255,6 +267,102 @@ def process_file(
     return rep
 
 
+def rewrite(rep: FileReport, lang: str) -> None:
+    """Re-render a written report after its analysis changed (e.g. cross-file comparisons)."""
+    payload = json.loads(rep.json_path.read_text(encoding="utf-8"))
+    payload["analysis"] = rep.analysis
+    rep.json_path.write_text(report.dumps(payload), encoding="utf-8")
+    body = report.render_body(payload, rep.plots, lang)
+    rep.html_path.write_text(report.page(f"{rep.file} - report", body, lang), encoding="utf-8")
+
+
+def compare_terrains(reports: list[FileReport], lang: str) -> None:
+    """Earth DEMs processed together with Moon/Mars DEMs get a terrain similarity to each."""
+    dems = [r for r in reports if r.json_path and (r.analysis or {}).get("terrain")]
+    others = [r for r in dems if r.analysis.get("body", "Earth") != "Earth"]
+    for rep in (r for r in dems if r.analysis.get("body", "Earth") == "Earth"):
+        rows = []
+        for o in others:
+            if cmp := analog.compare_terrain(rep.analysis["terrain"], o.analysis["terrain"]):
+                rows.append({"compared_with": o.file, "body": o.analysis["body"], **cmp})
+        if rows:
+            rep.analysis["terrain_analogs"] = sorted(rows, key=lambda r: -r["similarity"])
+            rewrite(rep, lang)
+
+
+def analog_report(
+    target: str, sites: list[dict], features: list[dict | None], out_dir: Path, lang: str = "en"
+) -> FileReport:
+    """Rank candidate sites as analogs of a Moon/Mars target and write the report."""
+    from . import plots
+
+    out_dir.mkdir(parents=True, exist_ok=True)
+    ranking = analog.rank(sites, features, target)
+    label = f"Analog sites - {analog.TARGETS[target].name}"
+    analysis = {
+        "summary": {
+            "target": analog.TARGETS[target].name,
+            "sites": len(sites),
+            "climate": "NASA POWER climatology, January 2001 - December 2020",
+        },
+        "coverage": {},
+        "statistics": {},
+        "trends": [],
+        "notes": [],
+        "ranking": ranking,
+        "quality": [],
+    }
+    rep = FileReport(label, out_dir, "analog", "Analysis", "analog", analysis)
+    scored = [r for r in ranking["ranking"] if r.get("score") is not None]
+    if scored:
+        figs = [
+            (
+                "Analog scores",
+                plots.analog_bars(scored, f"{analog.TARGETS[target].name}: analog score"),
+            ),
+            (
+                "Site map",
+                plots.site_map(
+                    scored, f"{analog.TARGETS[target].name}: candidate sites (colour = score)"
+                ),
+            ),
+        ]
+        stem = _safe_name(label)
+        plot_dir = out_dir / f"{stem}_plots"
+        plot_dir.mkdir(exist_ok=True)
+        for i, (title, png) in enumerate(figs, 1):
+            fname = f"{i:02d}_{_safe_name(title)}.png"
+            (plot_dir / fname).write_bytes(png)
+            rep.plots.append((title, f"{plot_dir.name}/{fname}", png))
+    payload = {
+        "file": label,
+        "source": "",
+        "reader": "analog",
+        "category": "Analysis",
+        "kind": "analog",
+        "size_bytes": 0,
+        "size_human": f"{len(sites)} sites",
+        "generated": f"{datetime.now():%Y-%m-%d %H:%M}",
+        "problems": [],
+        "error": None,
+        "analysis": analysis,
+        "plots": [{"title": t, "file": f} for t, f, _ in rep.plots],
+        "headline": (
+            f"{len(scored)} sites scored · best: {scored[0]['name']} ({scored[0]['score']}/100)"
+            if scored
+            else "no site could be scored"
+        ),
+    }
+    stem = _safe_name(label)
+    rep.json_path = out_dir / f"{stem}.json"
+    rep.json_path.write_text(report.dumps(payload), encoding="utf-8")
+    rep.html_path = out_dir / f"{stem}.html"
+    rep.html_path.write_text(
+        report.page(label, report.render_body(payload, rep.plots, lang), lang), encoding="utf-8"
+    )
+    return rep
+
+
 def process(
     path: str | Path,
     opts: ReadOptions | None = None,
@@ -306,6 +414,7 @@ def process(
     total = len(inputs)  # archives may add more; the count grows as they are opened
     for p, label in inputs:
         handle(p, label)
+    compare_terrains(reports, opts.lang)
 
     # index every report in out_dir, so repeated runs accumulate instead of overwriting
     entries = []

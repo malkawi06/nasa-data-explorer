@@ -23,6 +23,10 @@ Generic "drop any NASA/scientific file in, get a report" tool for Space Apps hac
   `ai_view.py` renders the AI panel, quality list and product cards.
 - `analysis/quality.py`: rule-based checks, run for every file. `products.py`: the NASA product
   catalog.
+- `bodies.py`: which planetary body a CRS/label describes. `analysis/terrain.py`: DEM slope,
+  roughness, depressions and the per-baseline profile. `analog.py`: Moon/Mars analog targets,
+  factor scoring, built-in sites, terrain comparison. `power.py`: NASA POWER URLs and downloads
+  (the browser fetches the same URLs itself).
 - `qa.py`: retrieval (sentence-transformers or TF-IDF).
 - `evals/`: AI eval cases with known truths (`python -m evals.run --provider X`).
   `tests/e2e/`: browser tests. The harness stubs Pyodide and proxies bridge calls to CPython.
@@ -65,4 +69,10 @@ Generic "drop any NASA/scientific file in, get a report" tool for Space Apps hac
 - Sending file content to a provider is opt-in only (`AI_SEND_IMAGES=1` / `--ai-images`, the web
   "Send images" box) and only for `ai.VISION` providers. `Step.image` carries it; keep the default
   path summary-only.
+- Never reproject Moon/Mars rasters to EPSG:4326: bounds go to the body's own geodetic CRS
+  (`grid._geographic_bounds`). PROJ refuses or silently mixes bodies otherwise.
+- Terrain numbers depend on pixel size: always report the baseline and compare DEMs only via
+  `by_baseline_m` (same baseline).
+- `tests/data/power/*.json` are real POWER climatology responses (2001-2020); the analog ranking
+  tests rely on them, so do not replace them with synthetic data.
 - Tests force `NASA_EXPLORER_EMBEDDINGS=tfidf` and clear AI keys; AI is tested with a fake provider.

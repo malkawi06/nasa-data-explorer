@@ -43,6 +43,19 @@ def build_parser() -> argparse.ArgumentParser:
         help="with --ai: also send a downscaled copy of plain images to the provider "
         "(Gemini/Anthropic) for a visual analysis",
     )
+    p.add_argument(
+        "--power",
+        metavar="LAT,LON[,START,END]",
+        help="download NASA POWER daily data for a point (default: last 10 full years) and analyse it",
+    )
+    p.add_argument(
+        "--analog",
+        choices=("moon_south_pole", "mars_low_latitude", "mars_polar"),
+        help="rank Earth sites as Moon/Mars analogs with NASA POWER climate (built-in sites + --sites)",
+    )
+    p.add_argument(
+        "--sites", metavar="CSV", help="with --analog: extra sites, columns name,lat,lon"
+    )
     p.add_argument("--ask", metavar="QUESTION", help="Q&A over everything processed in --out")
     p.add_argument("--no-plots", action="store_true", help="skip plots (faster)")
     p.add_argument("--formats", action="store_true", help="list supported formats and exit")
@@ -60,6 +73,55 @@ def print_formats() -> None:
         print(f"{r.category:24} {r.name:15} {' '.join(r.extensions):45} {state}")
 
 
+def _fetch_power(spec: str, out_dir: Path) -> Path:
+    from . import power
+
+    parts = [p.strip() for p in spec.split(",")]
+    if len(parts) not in (2, 4):
+        raise ValueError("--power needs LAT,LON or LAT,LON,START,END")
+    start, end = (parts[2], parts[3]) if len(parts) == 4 else power.default_period()
+    return power.fetch_daily(float(parts[0]), float(parts[1]), start, end, out_dir)
+
+
+def _analog(args) -> int:
+    import csv
+
+    from . import analog, power
+    from .pipeline import analog_report
+
+    sites = list(analog.SITES)
+    if args.sites:
+        with open(args.sites, encoding="utf-8-sig", newline="") as fh:
+            for row in csv.DictReader(fh):
+                low = {k.strip().lower(): v for k, v in row.items() if k}
+                sites.append(
+                    {
+                        "name": low.get("name", "site"),
+                        "lat": float(low["lat"]),
+                        "lon": float(low["lon"]),
+                        "analog_for": "",
+                    }
+                )
+    cache = Path.home() / ".cache" / "nasa_explorer" / "power"
+    features = []
+    for s in sites:
+        try:
+            features.append(
+                analog.climate_features(power.fetch_climatology(s["lat"], s["lon"], cache))
+            )
+        except Exception as exc:
+            print(f"warning: {s['name']}: {exc}", file=sys.stderr)
+            features.append(None)
+    rep = analog_report(args.analog, sites, features, Path(args.out), args.lang)
+    for r in rep.analysis["ranking"]["ranking"][:15]:
+        score = "--" if r.get("score") is None else f"{r['score']:3d}"
+        print(f"{r['rank']:3d}. {score}/100  {r['name']}")
+    if v := rep.analysis["ranking"].get("validation"):
+        print(f"\ncheck: {v['text']}")
+    print(f"report: {rep.html_path}")
+    return 0
+
+
 def main(argv: list[str] | None = None) -> int:
     args = build_parser().parse_args(argv)
     logging.basicConfig(
@@ -73,6 +135,14 @@ def main(argv: list[str] | None = None) -> int:
     if args.app:
         app = Path(__file__).with_name("app.py")
         return subprocess.call([sys.executable, "-m", "streamlit", "run", str(app)])
+    if args.power:
+        try:
+            args.path = str(_fetch_power(args.power, Path(args.out) / "downloads"))
+        except Exception as exc:
+            print(f"error: NASA POWER request failed: {exc}", file=sys.stderr)
+            return 1
+    if args.analog:
+        return _analog(args)
     if not args.path and not args.ask:
         build_parser().print_usage()
         return 2

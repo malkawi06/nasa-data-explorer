@@ -51,6 +51,9 @@ nasa-explore MOD11A2.hdf --var LST_Day_1km
 nasa-explore era5.grib --bbox 34,29,40,34 --start 2020-01-01 --end 2020-12-31
 nasa-explore paper.pdf --ai --lang ar                 # Arabic report + AI paper summary
 nasa-explore data/ --ask "Which datasets measure soil moisture?"
+nasa-explore LDEM_80S_20M.IMG                         # lunar DEM: slopes, flat ground, craters
+nasa-explore --power 29.57,35.42                      # NASA POWER daily data for a point (last 10 years)
+nasa-explore --analog mars_low_latitude --sites my_sites.csv   # rank Earth sites as Mars analogs
 nasa-explore --formats                                # what's enabled in this environment
 nasa-explore --app                                    # Streamlit drag-and-drop UI
 ```
@@ -82,7 +85,8 @@ See [`examples/quickstart.ipynb`](examples/quickstart.ipynb). It also runs in Go
 | Earth science | hdf4 | .hdf .hdf4 .h4 | `\x0e\x03\x13\x01` | Dataset (MODIS calibration applied) |
 | Earth science | grib | .grib .grb .grib2 .grb2 | `GRIB` | Dataset (cfgrib) |
 | Earth science | zarr | .zarr, or a folder with `.zgroup` / `zarr.json` | – | Dataset |
-| Geospatial | geotiff | .tif .tiff .cog .jp2 .img .vrt | TIFF | Dataset (rioxarray) |
+| Geospatial | geotiff | .tif .tiff .cog .jp2 .img .vrt .hgt .bil .dem .grd .asc | TIFF, ESRI ASCII grid | Dataset (rioxarray) |
+| Planetary | planetary-raster | .lbl .img .cub .xml .vic | PDS3 / PDS4 / ISIS3 / VICAR labels | Dataset on the right body (Moon, Mars, ...) |
 | Geospatial | vector | .shp .geojson .kml .kmz .gpkg .gml .fgb | GeoJSON, KML, SQLite | GeoDataFrame |
 | Astronomy | fits | .fits .fit .fts | `SIMPLE  =` | Dataset (images, multi-extension) or DataFrame (tables) |
 | Images | image | .png .jpg .jpeg .tif .gif .bmp .webp | PNG, JPEG, GIF, BMP, TIFF | Dataset (y, x, band) |
@@ -93,6 +97,39 @@ See [`examples/quickstart.ipynb`](examples/quickstart.ipynb). It also runs in Go
 
 Document readers also list the NASA missions and datasets they mention (MODIS, VIIRS, GPM, GRACE,
 SMAP, ICESat-2, MERRA-2, FIRMS, and others), with page numbers.
+
+## Moon / Mars analogs (Space Apps 2026: Earth analogs of lunar base and Mars sites)
+
+**Terrain of any elevation model** (SRTM, Copernicus DEM, LOLA, MOLA, HiRISE DTMs, ...), found
+by file or variable name:
+- Slope, roughness (TRI) and the share of flat ground (<5°, <10°, <15°, <25°), in metres on the
+  right body: a degree is 111 km on Earth but 30 km on the Moon.
+- Closed, crater-like depressions (sink filling, so valleys that drain do not count): number,
+  density per 1000 km², diameter, depth and depth/diameter.
+- Shaded relief with the depressions circled, a slope map and the slope distribution.
+- A profile at fixed baselines (10 m ... 10 km). Slopes depend on pixel size, so DEMs are only
+  compared at the same baseline.
+
+**Planetary data**: PDS3 (.IMG with attached or detached .LBL), PDS4 (.xml + data), ISIS3 cubes
+and VICAR are read through GDAL. The body comes from the CRS or the label; maps stay in lunar /
+Martian coordinates; LOLA/MOLA radii are turned into heights above the reference sphere.
+
+**Analog score**: how much an Earth site resembles a target environment:
+- Moon south-polar base (cold, dry, high latitude, cratered, flat pads).
+- Mars low/mid-latitude landing site (hyper-arid, dry air, clear sky, high altitude, gentle slopes).
+- Mars polar / ice-rich site (sub-zero, dry, high latitude).
+
+Each factor maps a measurable value (NASA POWER 2001-2020 climatology, DEM terrain, NDVI) from
+"not analog" (0) to "fully analog" (100); the weights and thresholds are documented in
+`nasa_explorer/analog.py`. The report shows every factor with its value, score, weight and the
+reason it matters, plus the data coverage. 24 built-in sites (expert-chosen analogs such as Atacama,
+Haughton, the Dry Valleys, plus candidates in Jordan) are scored with your own, so the ranking is
+checked against expert choices. With real POWER data the method puts the Dry Valleys first for
+the Moon, Atacama then Wadi Rum first for Mars landing sites.
+
+On the website: *Moon / Mars analog finder* and *NASA POWER climate for any point* in the sidebar.
+DEM or NDVI files you analysed that cover a site add terrain and vegetation to its score; an Earth
+DEM analysed together with a Moon/Mars DEM gets a terrain similarity at a common baseline.
 
 ## AI layer (optional)
 

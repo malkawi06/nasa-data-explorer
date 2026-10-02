@@ -42,7 +42,8 @@ def test_gridded_have_map_and_stats(samples, tmp_path, name):
         pytest.skip(f"{name} writer not installed")
     rep = process_file(samples[name][0], ReadOptions(), tmp_path)
     assert rep.analysis["statistics"]
-    assert any(t.startswith("Map") for t, _, _ in rep.plots)
+    # elevation models (the GeoTIFF sample is dem.tif) show shaded relief instead of a plain map
+    assert any(t.startswith(("Map", "Shaded relief")) for t, _, _ in rep.plots)
 
 
 @pytest.mark.parametrize("name", ["csv", "tsv", "txt_delimited", "xlsx", "parquet", "json_records"])

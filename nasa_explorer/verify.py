@@ -81,6 +81,17 @@ def facts(analysis: dict) -> dict[str, Any]:
     for key in ("events", "correlations", "categories", "image"):
         if analysis.get(key):
             _flatten(key, analysis[key], out)
+    if t := analysis.get("terrain"):
+        brief = {k: v for k, v in t.items() if k not in ("by_baseline_m", "depressions")}
+        brief["depressions"] = {k: v for k, v in t.get("depressions", {}).items() if k != "largest"}
+        _flatten("terrain", brief, out)
+    for key, sc in (analysis.get("analog") or {}).get("scores", {}).items():
+        out[f"analog.{key}.score"] = sc.get("score")
+        for f in sc.get("factors", []):
+            if f.get("value") is not None:
+                out[f"analog.{key}.{f['key']}"] = f["value"]
+    for r in (analysis.get("ranking") or {}).get("ranking", [])[:15]:
+        out[f"ranking.{r['rank']}.{r['name']}"] = r.get("score")
     for name, st in analysis.get("statistics", {}).items():
         _flatten(f"statistics.{name}", {k: v for k, v in st.items() if k != "sampled"}, out)
     return out
