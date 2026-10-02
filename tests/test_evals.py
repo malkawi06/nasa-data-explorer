@@ -16,7 +16,9 @@ def _run(case, tmp_path, replies):
     rep = process_file(case.path, ReadOptions(plots=False), tmp_path / "r")
     res, _, _ = read_file(case.path, ReadOptions())
     fake = FakeProvider(replies=replies)
-    fake.model = f"fake-{len(replies)}-{hash(replies[0])}"  # separate on-disk cache entry per scripted run
+    fake.model = (
+        f"fake-{len(replies)}-{hash(replies[0])}"  # separate on-disk cache entry per scripted run
+    )
     client = ai.AIClient(fake, verbose=False)
     return rep, ai.run_workflow(ai.workflow_for(rep, res, "en"), client)
 
