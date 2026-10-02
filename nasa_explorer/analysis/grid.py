@@ -10,7 +10,7 @@ import xarray as xr
 
 from .. import plots
 from ..core import ReadOptions, ReadResult
-from .stats import MAX_SAMPLE, numeric_stats, time_coverage, trend
+from .stats import MAX_SAMPLE, numeric_stats, seasonal_cycle, time_coverage, trend
 
 LAT_NAMES = {"lat", "latitude", "nav_lat", "lats", "xlat", "lat_0", "gridlat_0"}
 LON_NAMES = {"lon", "longitude", "nav_lon", "lons", "long", "xlong", "lon_0", "gridlon_0"}
@@ -192,6 +192,47 @@ def _area_mean(da: xr.DataArray, tdim: str, lat: str | None, ds: xr.Dataset) -> 
     return series.to_series()
 
 
+MAX_TREND_SIDE = 300
+MIN_TREND_STEPS = 8
+
+
+def pixel_trends(
+    da: xr.DataArray, tdim: str, tindex: pd.DatetimeIndex, ydim: str, xdim: str, deseasonalize: bool
+) -> tuple[np.ndarray, np.ndarray, xr.DataArray]:
+    """Vectorised per-pixel OLS slope (units/year) and two-sided t-test p-value.
+
+    Indicative only: unlike the area-mean test, it is not corrected for autocorrelation.
+    """
+    from scipy.stats import t as student_t
+
+    step = max(1, math.ceil(max(da.sizes[ydim], da.sizes[xdim]) / MAX_TREND_SIDE))
+    sub = da.isel({ydim: slice(None, None, step), xdim: slice(None, None, step)}).transpose(
+        tdim, ydim, xdim
+    )
+    y = np.asarray(sub.values, dtype="float64")
+    if deseasonalize:
+        months = tindex.month.to_numpy()
+        for m in np.unique(months):
+            sel = months == m
+            with np.errstate(all="ignore"):
+                y[sel] -= np.nanmean(y[sel], axis=0)
+    x = (tindex.year + (tindex.dayofyear - 1) / 365.25).to_numpy(dtype="float64")[:, None, None]
+    mask = np.isfinite(y)
+    n = mask.sum(axis=0)
+    with np.errstate(all="ignore"):
+        xbar = np.where(mask, x, 0).sum(axis=0) / n
+        ybar = np.nansum(y, axis=0) / n
+        dx = np.where(mask, x - xbar, 0)
+        sxx = (dx**2).sum(axis=0)
+        slope = np.nansum(dx * (y - ybar), axis=0) / sxx
+        resid = np.where(mask, y - ybar - slope * (x - xbar), 0)
+        se = np.sqrt((resid**2).sum(axis=0) / (n - 2) / sxx)
+        p = 2 * student_t.sf(np.abs(slope / se), n - 2)
+    bad = n < MIN_TREND_STEPS
+    slope[bad], p[bad] = np.nan, np.nan
+    return slope, p, sub.isel({tdim: 0})
+
+
 def analyze_grid(res: ReadResult, opts: ReadOptions) -> tuple[dict, list[tuple[str, bytes]]]:
     ds, notes = subset(res.data, opts)
     lat, lon, tname = find_coord(ds, "lat"), find_coord(ds, "lon"), find_coord(ds, "time")
@@ -250,6 +291,68 @@ def analyze_grid(res: ReadResult, opts: ReadOptions) -> tuple[dict, list[tuple[s
                         ),
                     )
                 )
+    trend_map = None
+    if main and tdim in ds[main].dims and tindex is not None and ds.sizes[tdim] >= MIN_TREND_STEPS:
+        da = ds[main]
+        _, _, _, fixed = _map_slice(da.isel({tdim: slice(0, 1)}), ds, lat, lon)
+        ydim, xdim = [d for d in da.dims if d not in fixed]
+        main_trend = next((t for t in trends if t["variable"] == main), {})
+        reduced = da.isel({d: 0 for d in fixed if d != tdim})
+        slope, p, frame = pixel_trends(
+            reduced, tdim, tindex, ydim, xdim, bool(main_trend.get("seasonal"))
+        )
+        valid = np.isfinite(p)
+        if valid.any():
+            units = str(da.attrs.get("units", ""))
+            trend_map = {
+                "variable": main,
+                "units_per_year": f"{units}/year" if units else "per year",
+                "pixels": int(valid.sum()),
+                "pct_significant_increase": round(
+                    100 * float(((p < 0.05) & (slope > 0)).sum() / valid.sum()), 1
+                ),
+                "pct_significant_decrease": round(
+                    100 * float(((p < 0.05) & (slope < 0)).sum() / valid.sum()), 1
+                ),
+                "median_slope_per_year": float(np.nanmedian(slope)),
+                "method": "per-pixel OLS t-test, p<0.05"
+                + (" on deseasonalized values" if main_trend.get("seasonal") else "")
+                + " (not autocorrelation-corrected: indicative)",
+            }
+            if opts.plots:
+                la = frame[lat].values if lat in frame.coords else None
+                lo = frame[lon].values if lon in frame.coords else None
+                if la is not None and lo is not None and la.ndim != lo.ndim:
+                    la = lo = None
+                figs.append(
+                    (
+                        f"Trend map: {main}",
+                        plots.grid_map(
+                            slope,
+                            la,
+                            lo,
+                            f"{main} trend ({trend_map['units_per_year']}), dots = p<0.05",
+                            trend_map["units_per_year"],
+                            stipple=valid & (p < 0.05),
+                            symmetric=True,
+                        ),
+                    )
+                )
+        if (
+            opts.plots
+            and (
+                clim := seasonal_cycle(
+                    _area_mean(da, tdim, lat, ds).set_axis(tindex[: da.sizes[tdim]])
+                )
+            )
+            is not None
+        ):
+            figs.append(
+                (
+                    f"Seasonal cycle: {main}",
+                    plots.seasonal_cycle({main: clim}, "Mean annual cycle (area mean)"),
+                )
+            )
     if opts.plots and main:
         da = ds[main]
         arr, la, lo, fixed = _map_slice(da, ds, lat, lon)
@@ -267,4 +370,5 @@ def analyze_grid(res: ReadResult, opts: ReadOptions) -> tuple[dict, list[tuple[s
         "trends": trends,
         "notes": notes,
         "main_variable": main,
+        "trend_map": trend_map,
     }, figs

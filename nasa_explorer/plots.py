@@ -87,9 +87,17 @@ def grid_map(
     title: str,
     label: str,
     use_cartopy: bool = True,
+    stipple: np.ndarray | None = None,
+    symmetric: bool = False,
 ) -> bytes:
+    """Map of a 2-D field. `stipple` marks cells (e.g. significant trends) with dots;
+    `symmetric` forces a zero-centred diverging scale (for slopes and anomalies)."""
     arr = np.asarray(arr, dtype="float64")
     cmap, vmin, vmax = _cmap_for(arr)
+    if symmetric:
+        finite = np.abs(arr[np.isfinite(arr)])
+        m = float(np.percentile(finite, 98)) if finite.size else 1.0
+        cmap, vmin, vmax = DIV, -m, m
     extent = None
     if (
         lat is not None
@@ -103,11 +111,14 @@ def grid_map(
         extent = [lon.min() - dlon, lon.max() + dlon, lat.min() - dlat, lat.max() + dlat]
         if lat[0] < lat[-1]:
             arr = arr[::-1]
+            stipple = stipple[::-1] if stipple is not None else None
         if lon[0] > lon[-1]:
             arr = arr[:, ::-1]
+            stipple = stipple[:, ::-1] if stipple is not None else None
+    pts = _stipple_points(stipple, arr.shape, extent, lat, lon)
     if use_cartopy and extent is not None:
         try:
-            return _cartopy_map(arr, extent, cmap, vmin, vmax, title, label)
+            return _cartopy_map(arr, extent, cmap, vmin, vmax, title, label, pts)
         except Exception:
             pass  # cartopy missing or Natural Earth data unavailable offline
     fig, ax = plt.subplots(figsize=(8, 4.5))
@@ -125,6 +136,9 @@ def grid_map(
             aspect="auto" if extent is None else "equal",
             interpolation="nearest",
         )
+    if pts is not None:
+        ax.scatter(*pts, s=2, color=INK, linewidths=0, label="significant (p<0.05)")
+        ax.legend(frameon=False, fontsize=8, labelcolor=INK_2, loc="lower left", markerscale=3)
     if extent is not None or (lat is not None and lat.ndim == 2):
         ax.set_xlabel("longitude")
         ax.set_ylabel("latitude")
@@ -133,7 +147,25 @@ def grid_map(
     return _png(fig)
 
 
-def _cartopy_map(arr, extent, cmap, vmin, vmax, title, label) -> bytes:
+def _stipple_points(stipple, shape, extent, lat, lon):
+    if stipple is None or not np.any(stipple):
+        return None
+    ys, xs = np.nonzero(stipple)
+    if ys.size > 20_000:
+        keep = np.random.default_rng(0).choice(ys.size, 20_000, replace=False)
+        ys, xs = ys[keep], xs[keep]
+    ny, nx = shape
+    if extent is not None:
+        return (
+            extent[0] + (xs + 0.5) * (extent[1] - extent[0]) / nx,
+            extent[3] - (ys + 0.5) * (extent[3] - extent[2]) / ny,
+        )
+    if lat is not None and lon is not None and lat.ndim == 2:
+        return lon[ys, xs], lat[ys, xs]
+    return xs.astype(float), ys.astype(float)
+
+
+def _cartopy_map(arr, extent, cmap, vmin, vmax, title, label, pts=None) -> bytes:
     import cartopy.crs as ccrs
 
     fig = plt.figure(figsize=(8, 4.5))
@@ -148,6 +180,16 @@ def _cartopy_map(arr, extent, cmap, vmin, vmax, title, label) -> bytes:
         transform=ccrs.PlateCarree(),
         interpolation="nearest",
     )
+    if pts is not None:
+        ax.scatter(
+            *pts,
+            s=2,
+            color=INK,
+            linewidths=0,
+            transform=ccrs.PlateCarree(),
+            label="significant (p<0.05)",
+        )
+        ax.legend(frameon=False, fontsize=8, labelcolor=INK_2, loc="lower left", markerscale=3)
     ax.coastlines(linewidth=0.6, color=INK_2)
     ax.set_extent(extent, crs=ccrs.PlateCarree())
     gl = ax.gridlines(draw_labels=True, linewidth=0.4, color=GRID)
@@ -308,4 +350,28 @@ def thumbnail(arr: np.ndarray, title: str) -> bytes:
     show = arr[..., 0] if arr.shape[-1] == 1 else arr[..., :3]
     ax.imshow(show, cmap="gray" if arr.shape[-1] == 1 else None)
     ax.set_title(title)
+    return _png(fig)
+
+
+MONTHS = ["J", "F", "M", "A", "M", "J", "J", "A", "S", "O", "N", "D"]
+
+
+def seasonal_cycle(clims: dict[str, pd.Series], title: str) -> bytes:
+    """Mean annual cycle (12 monthly means) per variable, as small multiples."""
+    items = list(clims.items())[: len(SERIES)]
+    fig, axes = plt.subplots(
+        1, len(items), figsize=(min(12, 3.4 * len(items) + 1), 2.8), squeeze=False
+    )
+    for ax, color, (name, clim) in zip(axes[0], SERIES, items, strict=False):
+        ax.plot(
+            range(1, 13),
+            clim.reindex(range(1, 13)).to_numpy(),
+            color=color,
+            marker="o",
+            markersize=4,
+        )
+        ax.set_xticks(range(1, 13), MONTHS)
+        ax.set_title(str(name)[:30], fontsize=9)
+    fig.suptitle(title, x=0.01, ha="left", fontsize=11, fontweight="bold", color=INK)
+    fig.tight_layout()
     return _png(fig)

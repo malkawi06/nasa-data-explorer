@@ -9,7 +9,7 @@ import pandas as pd
 
 from .. import plots
 from ..core import ReadOptions, ReadResult
-from .stats import numeric_stats, time_coverage, trend
+from .stats import numeric_stats, seasonal_cycle, time_coverage, trend
 
 SENTINELS = (-9999, -9999.0, -999, -999.0, -999.9, -99999, -99.99, -8888, 9.96921e36, 1e20)
 LAT_RE = re.compile(r"^(lat|latitude|lat_dd|lat_deg|decimallatitude|y_lat)$", re.I)
@@ -204,6 +204,13 @@ def analyze_table(res: ReadResult, opts: ReadOptions) -> tuple[dict, list[tuple[
                     ),
                 )
             )
+            clims = {
+                str(c): cl
+                for c in numeric[:MAX_TS_COLS]
+                if (cl := seasonal_cycle(per_date[c])) is not None
+            }
+            if clims:
+                figs.append(("Seasonal cycle", plots.seasonal_cycle(clims, "Mean annual cycle")))
     if opts.plots:
         if lat:
             color_col = numeric[0] if numeric else None
