@@ -77,6 +77,9 @@ def facts(analysis: dict) -> dict[str, Any]:
         _flatten(f"trends.{t['variable']}", brief, out)
     if analysis.get("trend_map"):
         _flatten("trend_map", analysis["trend_map"], out)
+    for key in ("events", "correlations", "categories"):
+        if analysis.get(key):
+            _flatten(key, analysis[key], out)
     for name, st in analysis.get("statistics", {}).items():
         _flatten(f"statistics.{name}", {k: v for k, v in st.items() if k != "sampled"}, out)
     return out
@@ -174,6 +177,33 @@ def verify_data(result: dict, f: dict[str, Any]) -> dict:
     return result
 
 
+TREND_PATH = re.compile(
+    r"^trends\.(.+)\.(slope_per_year|slope_per_decade|sens_slope_per_step|mk_p|r2|regression_p)$"
+)
+NOT_SIGNIFICANT = re.compile(
+    r"not\s+(statistically\s+)?significant|no\s+(statistically\s+)?significant|insignificant|non-?significant|"
+    r"not\s+robust|no\s+clear\s+trend|غير\s+دال|ليس\s+دال|غير\s+معنوي|لا\s+يوجد\s+اتجاه",
+    re.I,
+)
+
+
+def _significance_problem(path: str, text: str, f: dict[str, Any]) -> str | None:
+    """A trend claim must agree with its Mann-Kendall test: the number can be right while the
+    sentence is misleading (a non-significant slope presented as a trend, or the reverse)."""
+    m = TREND_PATH.match(path)
+    if not m:
+        return None
+    p = f.get(f"trends.{m.group(1)}.mk_p")
+    if not isinstance(p, int | float):
+        return None
+    says_not = bool(NOT_SIGNIFICANT.search(text))
+    if p >= 0.05 and not says_not:
+        return f"the {m.group(1)} trend is not statistically significant (p={p:.2g}); the sentence must say so"
+    if p < 0.05 and says_not:
+        return f"the {m.group(1)} trend IS significant (p={p:.2g}), contrary to the sentence"
+    return None
+
+
 def _check_finding(item: dict, f: dict[str, Any], pool: list[float]) -> tuple[str, str]:
     path = str(item.get("fact") or "").strip()
     value = item.get("value")
@@ -193,6 +223,8 @@ def _check_finding(item: dict, f: dict[str, Any], pool: list[float]) -> tuple[st
         ]
         if bad:
             return "unsupported", f"number(s) {', '.join(bad)} not found in the computed facts"
+        if problem := _significance_problem(path, str(item.get("text", "")), f):
+            return "mismatch", problem
         return "verified", f"{path} = {_fmt(target)}"
     if not nums:
         return "qualitative", ""

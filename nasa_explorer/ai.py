@@ -354,7 +354,7 @@ def _lang_rule(lang: str) -> str:
 
 DATA_SCHEMA = """{
   "overview": "2-4 sentences: what this data is and what it shows",
-  "findings": [{"text": "one finding with its number", "value": <number or null>, "fact": "<exact fact path or null>"}],
+  "findings": [{"text": "one insight with its number", "value": <number or null>, "fact": "<exact fact path or null>"}],
   "quality_issues": [{"text": "problem and why it matters", "severity": "high|medium|low"}],
   "next_analyses": ["concrete analysis to run next"],
   "visualizations": ["chart/map that would work in a demo"],
@@ -406,6 +406,12 @@ def data_workflow(analysis: dict, file: str, reader: str, lang: str) -> Workflow
         "Rules: only the summary below was computed - you never see the raw data. Every finding that "
         'contains a number MUST set "fact" to one exact path from FACTS and "value" to that number. '
         "Do not compute new numbers except simple unit conversions you state explicitly. "
+        "Write 4-7 findings that a scientist would find informative: patterns in time (trends, "
+        "seasonality, unusual periods), in space (where values or events concentrate), and "
+        "relationships between variables. Do not restate trivial facts (row counts, a maximum "
+        "confidence score) unless they matter for interpretation. Round numbers to 2-3 significant "
+        "figures. Any statement about a trend MUST say whether it is statistically significant "
+        "(significant only when its mk_p < 0.05); never present a non-significant slope as a trend. "
         "Reflect the automatic quality checks and product notes in quality_issues/caveats."
     )
     raw = yield Step(

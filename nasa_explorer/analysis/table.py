@@ -9,6 +9,7 @@ import pandas as pd
 
 from .. import plots
 from ..core import ReadOptions, ReadResult
+from . import events as ev
 from .stats import numeric_stats, seasonal_cycle, time_coverage, trend
 
 SENTINELS = (-9999, -9999.0, -999, -999.0, -999.9, -99999, -99.99, -8888, 9.96921e36, 1e20)
@@ -182,6 +183,31 @@ def analyze_table(res: ReadResult, opts: ReadOptions) -> tuple[dict, list[tuple[
 
     figs: list[tuple[str, bytes]] = []
     trends: list[dict] = []
+    event_info: dict | None = None
+    if ev.is_event_table(times, bool(lat)):
+        # rows are events (e.g. fire detections): analyse how many happen when and where
+        event_info, counts = ev.summarize(times, df, lat, lon)
+        if t := trend(counts, "events per day", "events/day"):
+            trends.append(t)
+        if opts.plots:
+            monthly = counts.resample("MS").sum()
+            figs.append(
+                (
+                    "Events over time",
+                    plots.time_series(
+                        {"events per month": monthly}, "Number of events per month", "events"
+                    ),
+                )
+            )
+            if (cl := seasonal_cycle(counts)) is not None:
+                figs.append(
+                    (
+                        "Seasonal cycle of events",
+                        plots.seasonal_cycle(
+                            {"events per day": cl}, "Average events per day, by month"
+                        ),
+                    )
+                )
     if times is not None and numeric:
         ts = df[numeric].set_index(pd.DatetimeIndex(times)).sort_index()
         ts = ts[ts.index.notna()]
@@ -191,7 +217,7 @@ def analyze_table(res: ReadResult, opts: ReadOptions) -> tuple[dict, list[tuple[
         for c in numeric[:MAX_TREND_COLS]:
             if t := trend(per_date[c], str(c)):
                 trends.append(t)
-        if opts.plots and len(per_date) > 1:
+        if opts.plots and len(per_date) > 1 and event_info is None:
             lines = {t["variable"]: (t["slope_per_year"], t["intercept"]) for t in trends}
             title = "Time series" + (" (mean per date)" if len(per_date) < len(ts) else "")
             figs.append(
@@ -236,10 +262,15 @@ def analyze_table(res: ReadResult, opts: ReadOptions) -> tuple[dict, list[tuple[
             figs.append(
                 ("Correlation heatmap", plots.correlation(df[numeric], "Correlation (Pearson)"))
             )
-    return {
+    out = {
         "summary": summary,
         "coverage": coverage,
         "statistics": stats,
         "trends": trends,
         "notes": notes,
-    }, figs
+        "categories": ev.categories(df, {str(c) for c in (lat, lon, tcol) if c}),
+        "correlations": ev.top_correlations(df[numeric]) if len(numeric) >= 2 else {},
+    }
+    if event_info:
+        out["events"] = event_info
+    return out, figs

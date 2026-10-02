@@ -30,10 +30,13 @@ def test_cases_build_and_quality_checks_see_the_planted_problems(tmp_path):
         "seasonal_station",
         "autocorrelated_noise",
         "planted_fill",
+        "fire_events",
         "paper",
     }
     rep = process_file(cases["planted_fill"].path, ReadOptions(plots=False), tmp_path / "r")
     assert any(q["code"] == "undeclared_fill" for q in rep.analysis["quality"])
+    rep = process_file(cases["fire_events"].path, ReadOptions(plots=False), tmp_path / "r")
+    assert rep.analysis["events"]["peak_month"] in ("July", "August")
     rep = process_file(cases["seasonal_station"].path, ReadOptions(plots=False), tmp_path / "r")
     assert rep.analysis["trends"][0]["seasonal"]
     rep = process_file(cases["autocorrelated_noise"].path, ReadOptions(plots=False), tmp_path / "r")

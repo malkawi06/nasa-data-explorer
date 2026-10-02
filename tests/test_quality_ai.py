@@ -229,3 +229,80 @@ def test_heatwave_is_reported_as_extreme_and_rain_is_not_an_outlier():
         for q in check("grid", {"statistics": {"precip": rain}, "coverage": {}})
         if q["code"] == "outliers"
     ]
+
+
+def test_trend_claims_must_match_significance():
+    f = {
+        "trends.frp.slope_per_year": 0.69,
+        "trends.frp.mk_p": 0.068,
+        "trends.t2m.slope_per_year": 0.043,
+        "trends.t2m.mk_p": 0.0001,
+    }
+    r = verify.verify_data(
+        {
+            "findings": [
+                {
+                    "text": "FRP increases by 0.69 per year",
+                    "value": 0.69,
+                    "fact": "trends.frp.slope_per_year",
+                },
+                {
+                    "text": "FRP rises 0.69/yr but this is not statistically significant",
+                    "value": 0.69,
+                    "fact": "trends.frp.slope_per_year",
+                },
+                {
+                    "text": "t2m warms 0.043 K/yr, significant",
+                    "value": 0.043,
+                    "fact": "trends.t2m.slope_per_year",
+                },
+                {
+                    "text": "t2m shows no significant trend (0.043 K/yr)",
+                    "value": 0.043,
+                    "fact": "trends.t2m.slope_per_year",
+                },
+                {
+                    "text": "اتجاه FRP غير دال إحصائياً",
+                    "value": 0.69,
+                    "fact": "trends.frp.slope_per_year",
+                },
+            ]
+        },
+        f,
+    )
+    assert [x["status"] for x in r["findings"]] == [
+        "mismatch",
+        "verified",
+        "verified",
+        "mismatch",
+        "verified",
+    ]
+    assert "not statistically significant" in r["findings"][0]["note"]
+
+
+def test_event_table_reports_counts_peak_month_and_hotspots(tmp_path):
+    rng = np.random.default_rng(1)
+    days = pd.date_range("2022-01-01", "2023-12-31", freq="D")
+    weights = np.asarray(1 + 6 * (days.month.isin([7, 8])), dtype=float)
+    picked = rng.choice(np.asarray(days), 3000, p=weights / weights.sum())
+    centres = np.array([[32.0, 36.0], [30.0, 47.0]])[rng.integers(0, 2, 3000)]
+    df = pd.DataFrame(
+        {
+            "acq_date": pd.to_datetime(picked).strftime("%Y-%m-%d"),
+            "latitude": centres[:, 0] + rng.normal(0, 0.2, 3000),
+            "longitude": centres[:, 1] + rng.normal(0, 0.2, 3000),
+            "frp": rng.gamma(2, 5, 3000),
+            "daynight": rng.choice(["D", "N"], 3000),
+        }
+    )
+    path = tmp_path / "events.csv"
+    df.to_csv(path, index=False)
+    rep = process_file(path, ReadOptions(), tmp_path / "out")
+    e = rep.analysis["events"]
+    assert e["total"] == 3000 and e["peak_month"] in ("July", "August")
+    assert len(e["hotspots"]) == 2 and abs(e["hotspots"]["1"]["share_pct"] - 50) < 5
+    assert rep.analysis["trends"][0]["variable"] == "events per day"
+    assert set(rep.analysis["categories"]["daynight"]) == {"D", "N"}
+    titles = [t for t, _, _ in rep.plots]
+    assert "Seasonal cycle of events" in titles and "Time series (mean per date)" not in titles
+    assert "events.peak_month_share_pct" in verify.facts(rep.analysis)

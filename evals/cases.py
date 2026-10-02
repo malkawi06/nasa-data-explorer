@@ -53,6 +53,20 @@ def build_cases(d: Path) -> list[Case]:
         d / "autocorrelated.csv", index=False
     )
 
+    fire_days = pd.date_range("2023-01-01", "2024-12-31", freq="D")
+    w = np.asarray(1 + 5 * np.exp(-(((fire_days.dayofyear - 215) / 30) ** 2)))
+    picked = rng.choice(np.asarray(fire_days), 4000, p=w / w.sum())
+    centres = np.array([[33.0, 36.0], [30.6, 47.2], [35.0, 40.5]])[rng.integers(0, 3, 4000)]
+    pd.DataFrame(
+        {
+            "acq_date": pd.to_datetime(picked).strftime("%Y-%m-%d"),
+            "latitude": centres[:, 0] + rng.normal(0, 0.3, 4000),
+            "longitude": centres[:, 1] + rng.normal(0, 0.3, 4000),
+            "frp": rng.lognormal(2.3, 1.0, 4000).round(1),
+            "daynight": rng.choice(["D", "N"], 4000, p=[0.7, 0.3]),
+        }
+    ).to_csv(d / "fires_events.csv", index=False)
+
     grid = xr.open_dataset(samples["netcdf4"][0]).load()
     grid["t2m"].values[:, :2, :2] = -9999.0  # fill value nobody declared
     grid.to_netcdf(d / "planted_fill.nc")
@@ -86,6 +100,14 @@ def build_cases(d: Path) -> list[Case]:
             "-9999 left in the data as a real value",
             [],
             [("fill", "-9999", "missing value")],
+        ),
+        Case(
+            "fire_events",
+            d / "fires_events.csv",
+            "fire detections peaking in July-August in 3 regions",
+            [],
+            [("august", "july", "summer"), ("hotspot", "cluster", "concentrat", "region")],
+            ["significant increase", "significantly increasing"],
         ),
         Case(
             "paper",

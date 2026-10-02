@@ -229,6 +229,14 @@ def kpi_tiles(rep: dict, L: dict) -> str:
                 L["significant"] if sig else L["not_significant"],
             )
         )
+    if e := a.get("events"):
+        tiles.append(
+            _tile(
+                L["events"],
+                f"{e['total']:,}",
+                f"{L['peak']}: {e['peak_month']} ({e['peak_month_share_pct']:g}%)",
+            )
+        )
     if (q := a.get("quality")) is not None:
         counts = {
             lvl: sum(1 for i in q if i["level"] == lvl) for lvl in ("error", "warning", "info")
@@ -259,6 +267,29 @@ def _fold(title: str, body: str, open_: bool = False) -> str:
     return f"<details class='fold'{' open' if open_ else ''}><summary>{html.escape(title)}</summary>{body}</details>"
 
 
+def _patterns(a: dict, L: dict) -> str:
+    """Event timing and hotspots, category mix and strongest relationships (tables only)."""
+    out = []
+    if e := a.get("events"):
+        months = " · ".join(f"{m} {v:g}%" for m, v in e["month_share_pct"].items())
+        out.append(
+            f"<div class='card'><b>{L['when']}</b><p class='muted small'>{html.escape(months)}</p>"
+            f"{to_html({k: v for k, v in e.items() if k not in ('month_share_pct', 'hotspots')})}</div>"
+        )
+        if e.get("hotspots"):
+            rows = [{"#": k, **v} for k, v in e["hotspots"].items()]
+            out.append(f"<h3>{L['where']}</h3><div class='card'>{to_html(rows)}</div>")
+    if cats := a.get("categories"):
+        out.append(
+            f"<h3>{L['categories']}</h3><div class='card'>{to_html({k: {v: f'{p:g}%' for v, p in d.items()} for k, d in cats.items()})}</div>"
+        )
+    if corr := a.get("correlations"):
+        out.append(
+            f"<h3>{L['relationships']}</h3><div class='card'>{to_html({k: f'r = {v:+.2f}' for k, v in corr.items()})}</div>"
+        )
+    return "".join(out)
+
+
 def render_body(rep: dict, plots: list[tuple[str, str, bytes]], lang: str) -> str:
     L = labels(lang)
     a = rep["analysis"]
@@ -284,6 +315,9 @@ def render_body(rep: dict, plots: list[tuple[str, str, bytes]], lang: str) -> st
         ]
         body += _fold(L["details"], f"<div class='card'>{to_html(rows)}</div>")
         sections.append(("trends", L["trends"], _section("trends", L["trends"], body)))
+    patterns = _patterns(a, L)
+    if patterns:
+        sections.append(("patterns", L["patterns"], _section("patterns", L["patterns"], patterns)))
     if plots:
         figs = "".join(
             f"<figure class='card fig'><figcaption>{html.escape(title)}</figcaption><img class='plot' "
