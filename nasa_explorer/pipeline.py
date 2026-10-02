@@ -287,9 +287,12 @@ def process(
     else:
         handle(path, path.name)
 
+    # index every report in out_dir, so repeated runs accumulate instead of overwriting
     entries = []
-    for r in reports:
-        data = json.loads(r.json_path.read_text(encoding="utf-8"))
-        entries.append({**data, "html": r.html_path.name})
+    for js in sorted(out_dir.glob("*.json")):
+        if js.name.endswith(".chunks.json") or not js.with_suffix(".html").exists():
+            continue
+        data = json.loads(js.read_text(encoding="utf-8"))
+        entries.append({**data, "html": js.with_suffix(".html").name})
     report.write_index(entries, out_dir, opts.lang)
     return reports
