@@ -1,0 +1,84 @@
+<!doctype html>
+<html lang="en" dir="ltr">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>NASA Data Explorer</title>
+  <meta name="description" content="Drop any NASA or scientific data file and get an instant analysis report. Runs entirely in your browser.">
+  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Ccircle cx='16' cy='16' r='14' fill='%232a78d6'/%3E%3Cpath d='M6 20c6-1 14-6 20-12' stroke='%23fff' stroke-width='2.5' fill='none'/%3E%3C/svg%3E">
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <header class="top">
+    <div class="wrap top-row">
+      <div>
+        <h1 data-i18n="title">NASA Data Explorer</h1>
+        <p class="sub" data-i18n="subtitle">Drop any data file or paper and get a report in seconds. It runs in your browser, so your files never leave this device.</p>
+      </div>
+      <div class="lang" role="group" aria-label="Language">
+        <button type="button" data-lang="en" aria-pressed="true">EN</button>
+        <button type="button" data-lang="ar" aria-pressed="false">عربي</button>
+      </div>
+    </div>
+  </header>
+
+  <main class="wrap">
+    <section class="status" aria-live="polite">
+      <span class="dot" id="status-dot"></span>
+      <span id="status-text" data-i18n="loading">Loading the Python runtime…</span>
+    </section>
+
+    <label class="drop" id="drop" for="file-input">
+      <input id="file-input" type="file" multiple>
+      <svg aria-hidden="true" viewBox="0 0 24 24" width="36" height="36"><path d="M12 16V4m0 0-4 4m4-4 4 4M4 16v3a1 1 0 0 0 1 1h14a1 1 0 0 0 1-1v-3" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg>
+      <strong data-i18n="drop">Drop files here or click to choose</strong>
+      <span class="hint" data-i18n="dropHint">NetCDF, HDF5, GeoTIFF, Shapefile (select all its parts), GeoJSON, FITS, CSV, Excel, JSON, Parquet, PDF, DOCX, images, ZIP…</span>
+    </label>
+
+    <details class="options">
+      <summary data-i18n="options">Options: variable, region, dates</summary>
+      <div class="grid">
+        <label><span data-i18n="var">Variable / column</span><input id="opt-var" type="text" placeholder="t2m" autocomplete="off"></label>
+        <label><span data-i18n="bbox">Bounding box W,S,E,N</span><input id="opt-bbox" type="text" placeholder="34,29,40,34" inputmode="decimal" autocomplete="off"></label>
+        <label><span data-i18n="start">Start date</span><input id="opt-start" type="date"></label>
+        <label><span data-i18n="end">End date</span><input id="opt-end" type="date"></label>
+      </div>
+      <p class="hint" id="opt-error" role="alert"></p>
+    </details>
+
+    <section id="results" aria-label="Reports"></section>
+
+    <section class="formats">
+      <h2 data-i18n="formats">Supported formats</h2>
+      <p class="hint" data-i18n="formatsHint">Extra libraries load the first time they are needed. Formats marked "desktop" need the Python install (see GitHub).</p>
+      <div class="table-wrap"><table id="formats"><tbody><tr><td>…</td></tr></tbody></table></div>
+    </section>
+  </main>
+
+  <footer class="wrap foot">
+    <span data-i18n="footer">Built for NASA Space Apps Challenge 2026 · Not affiliated with NASA</span> ·
+    <a href="https://github.com/malkawi06/nasa-data-explorer">GitHub</a>
+  </footer>
+
+  <template id="card-tpl">
+    <article class="card">
+      <div class="card-head">
+        <div class="card-title">
+          <h3 class="file"></h3>
+          <p class="meta"></p>
+          <p class="headline"></p>
+        </div>
+        <div class="actions">
+          <button type="button" class="btn open" data-i18n="open">Open</button>
+          <button type="button" class="btn dl-html" data-i18n="html">HTML</button>
+          <button type="button" class="btn dl-json" data-i18n="json">JSON</button>
+        </div>
+      </div>
+      <p class="err" hidden></p>
+      <iframe class="preview" title="Report preview" sandbox="allow-same-origin" loading="lazy"></iframe>
+    </article>
+  </template>
+
+  <script type="module" src="app.js"></script>
+</body>
+</html>

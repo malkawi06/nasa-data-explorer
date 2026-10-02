@@ -9,3 +9,4 @@ reports/
 *.idx
 build/
 dist/
+web/dist/
