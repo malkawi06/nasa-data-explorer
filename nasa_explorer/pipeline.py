@@ -10,7 +10,7 @@ from dataclasses import dataclass, field
 from datetime import datetime
 from pathlib import Path
 
-from . import archives, report
+from . import archives, products, report
 from .analysis import analyze
 from .core import ReadOptions, ReadResult
 from .readers.zarr_store import is_zarr_dir
@@ -188,6 +188,7 @@ def process_file(
     try:
         res, reader_name, problems = read_file(path, opts)
         analysis, figs = analyze(res, opts)
+        analysis["products"] = products.identify(label, analysis)
     except Exception as exc:  # report the failure instead of crashing a folder run
         log.exception("failed on %s", path)
         analysis, figs, error = {"summary": {}, "notes": []}, [], f"{type(exc).__name__}: {exc}"
