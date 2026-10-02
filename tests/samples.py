@@ -86,6 +86,13 @@ def _tabular(d: Path) -> dict[str, Sample]:
         "-END HEADER-\nYEAR,MO,DY,T2M\n" + rows + "\n2010,2,10,-999\n"
     )
     out["power_header_csv"] = (d / "power_like.csv", "delimited-text", "table")
+    days = pd.date_range("2012-01-01", "2023-12-31", freq="D")  # long + many ties: 32-bit sums
+    rng = np.random.default_rng(12)  # own stream: the shared RNG feeds the other samples
+    rain = np.round(rng.gamma(0.6, 5, len(days)) * (rng.random(len(days)) < 0.2), 1)
+    pd.DataFrame({"date": days, "rain_mm": rain, "t2m": rng.normal(20, 5, len(days))}).to_csv(
+        d / "daily_12y.csv", index=False
+    )
+    out["daily_long_csv"] = (d / "daily_12y.csv", "delimited-text", "table")
     (d / "whitespace.dat").write_text(
         "x y z\n" + "\n".join(f"{i} {i * 2.5:.1f} {RNG.normal():.3f}" for i in range(30))
     )

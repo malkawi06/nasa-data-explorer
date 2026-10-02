@@ -58,6 +58,32 @@ def test_body_detection():
     assert bodies.detect(None, "{'planet': 'Mars'}") == "Mars"
 
 
+def test_sweep_filling_equals_erosion_reconstruction():
+    from scipy import ndimage
+
+    from nasa_explorer.analysis.terrain import _filled
+
+    def erosion(z):
+        m = np.full_like(z, z.max())
+        m[0, :], m[-1, :], m[:, 0], m[:, -1] = z[0, :], z[-1, :], z[:, 0], z[:, -1]
+        while not np.array_equal(new := np.maximum(ndimage.grey_erosion(m, size=3), z), m):
+            m = new
+        return m
+
+    rng = np.random.default_rng(4)
+    z = ndimage.gaussian_filter(rng.normal(size=(70, 90)), 2) * 100
+    z[np.arange(70), np.arange(70)] -= 40  # a one-cell diagonal channel
+    n = 41
+    maze = np.full((n, n), 10.0)  # a spiral: the worst case for sweeps
+    for k in range(1, n // 2, 2):
+        maze[k, k : n - k] = maze[n - 1 - k, k : n - k] = maze[k : n - k, k] = maze[
+            k : n - k, n - 1 - k
+        ] = 99
+        maze[k, k + 1] = 10
+    for grid in (z, np.round(z), maze):
+        assert np.array_equal(_filled(grid), erosion(grid))
+
+
 def test_slope_crater_and_valley_on_known_terrain(tmp_path):
     n, px = 300, 30.0
     yy, xx = np.mgrid[:n, :n]

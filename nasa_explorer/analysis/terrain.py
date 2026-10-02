@@ -31,7 +31,7 @@ SLOPE_BINS = np.arange(0, 62, 2.0)  # 0-60° in 2° bins; the last bin collects 
 BASELINES_M = (10, 30, 100, 300, 1000, 3000, 10000)
 BASELINE_TOLERANCE = 0.25
 MIN_DEPRESSION_PX = 9
-MAX_FILL_ITER = 800
+MAX_FILL_ITER = 200  # sweep rounds; natural terrain settles in a handful
 
 
 def is_elevation(label: str, name: str, da: xr.DataArray) -> bool:
@@ -132,31 +132,41 @@ def hillshade(z: np.ndarray, dy: float, dx: np.ndarray, azimuth=315.0, altitude=
     return np.clip(shade, 0, 1)
 
 
+def _sweep(m: np.ndarray, z: np.ndarray) -> None:
+    """Gauss-Seidel passes down, then up, the rows of m (in place): a cell takes the lowest
+    level of its three neighbours in the row just updated, never less than its own height.
+    One pass carries a spill level across the whole grid; erosion moves it one cell a step."""
+    n = len(m)
+    for rows, prev_of in ((range(1, n), -1), (range(n - 2, -1, -1), 1)):
+        for i in rows:
+            prev = m[i + prev_of]
+            low = prev.copy()
+            np.minimum(low[1:], prev[:-1], out=low[1:])
+            np.minimum(low[:-1], prev[1:], out=low[:-1])
+            np.clip(low, z[i], m[i], out=m[i])
+
+
 def _filled(z: np.ndarray) -> np.ndarray:
-    """Depressions filled to their spill level (morphological reconstruction by erosion).
-    Valleys drain over the edge and stay open; only closed basins (craters, pits) fill."""
+    """Depressions filled to their spill level (morphological reconstruction by erosion,
+    8-connected). Valleys drain over the edge and stay open; only closed basins fill."""
     from scipy import ndimage
 
     valid = np.isfinite(z)
     if not valid.all():  # voids take their nearest valid height so they neither drain nor pool
         idx = ndimage.distance_transform_edt(~valid, return_distances=False, return_indices=True)
         z = z[tuple(idx)]
-    try:
-        from skimage.morphology import reconstruction
-
-        seed = np.full_like(z, z.max())
-        seed[0, :], seed[-1, :], seed[:, 0], seed[:, -1] = z[0, :], z[-1, :], z[:, 0], z[:, -1]
-        return reconstruction(seed, z, method="erosion")
-    except ImportError:
-        pass
-    marker = np.full_like(z, z.max())
-    marker[0, :], marker[-1, :], marker[:, 0], marker[:, -1] = z[0, :], z[-1, :], z[:, 0], z[:, -1]
-    for _ in range(MAX_FILL_ITER):  # geodesic erosion until stable (capped: huge basins underfill)
-        new = np.maximum(ndimage.grey_erosion(marker, size=(3, 3)), z)
-        if np.array_equal(new, marker):
+    m = np.full_like(z, z.max())
+    m[0, :], m[-1, :], m[:, 0], m[:, -1] = z[0, :], z[-1, :], z[:, 0], z[:, -1]
+    zt = np.ascontiguousarray(z.T)
+    for _ in range(MAX_FILL_ITER):  # row and column sweeps until nothing changes
+        old = m.copy()
+        _sweep(m, z)
+        mt = np.ascontiguousarray(m.T)
+        _sweep(mt, zt)
+        m = np.ascontiguousarray(mt.T)
+        if np.array_equal(m, old):
             break
-        marker = new
-    return marker
+    return m
 
 
 def depressions(

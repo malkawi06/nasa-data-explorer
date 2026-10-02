@@ -100,6 +100,101 @@ def _lag1(x: np.ndarray) -> float:
     return float(np.corrcoef(x[:-1], x[1:])[0, 1])
 
 
+SEN_SAMPLE = 400_000  # random pairs that bracket the median slope of long series
+SEN_BLOCK = 65_536  # pairwise slopes per numpy call: few calls, still cache-sized
+
+
+def _pair_slopes(x: np.ndarray):
+    """Every (x[i + k] - x[i]) / k, a block of lags k at a time (few numpy calls even in
+    the browser). The ragged ends of a block are NaN, which no comparison selects."""
+    n = x.size
+    padded = np.concatenate([x, np.full(n, np.nan)])
+    k = 1
+    while k < n:
+        b = max(1, min(n - k, SEN_BLOCK // (n - k)))
+        win = np.lib.stride_tricks.sliding_window_view(padded[k : n + b - 1], n - k)
+        yield (win - x[: n - k]) / np.arange(k, k + b)[:, None]
+        k += b
+
+
+def _sen_slope(x: np.ndarray) -> float:
+    """Theil-Sen slope per step: the median of all (x[j] - x[i]) / (j - i), exactly.
+
+    A daily series of 40 years has 128 million pairs, too many to hold. A random sample
+    of pairs brackets the median; one pass over the pairs counts the slopes on each side
+    of the bracket and keeps only those inside it. Ties at the bracket ends (dry days give
+    many slopes of exactly 0) are counted, not stored."""
+    n = x.size
+    total = n * (n - 1) // 2
+    ranks = ((total - 1) // 2, total // 2)  # the two middle slopes; equal when total is odd
+    if total <= 4 * SEN_SAMPLE:
+        d = np.concatenate([s[~np.isnan(s)] for s in _pair_slopes(x)])
+        return float(np.mean(np.partition(d, ranks)[list(ranks)]))
+    rng = np.random.default_rng(0)
+    # sample size that minimises sorting the sample plus the slopes inside the bracket
+    i, j = rng.integers(0, n, (2, int(min(SEN_SAMPLE, (3 * total) ** (2 / 3)))))
+    i, j = np.minimum(i, j)[i != j], np.maximum(i, j)[i != j]
+    sample = (x[j] - x[i]) / (j - i)
+    m, q = sample.size, ranks[1] / total
+    pad = 6 * np.sqrt(m * q * (1 - q)) + 2
+    while True:
+        a, b = int(m * q - pad), int(m * q + pad)
+        part = np.partition(sample, [max(a, 0), min(b, m - 1)])
+        lo, hi = (part[a] if a >= 0 else -np.inf), (part[b] if b < m else np.inf)
+        below = at_lo = at_hi = 0
+        inside = []
+        for s in _pair_slopes(x):
+            below += int(np.count_nonzero(s < lo))
+            near = s[(s >= lo) & (s <= hi)]
+            at_lo += int(np.count_nonzero(near == lo))
+            at_hi += int(np.count_nonzero(near == hi)) if hi != lo else 0
+            inside.append(near[(near > lo) & (near < hi)])
+        mid = np.concatenate(inside)
+        edges = np.cumsum([below, at_lo, mid.size, at_hi], dtype=np.int64)
+        if below <= ranks[0] and ranks[1] < edges[3]:
+            pos = [int(r - edges[1]) for r in ranks if edges[1] <= r < edges[2]]
+            mid = np.partition(mid, pos) if pos else mid
+            vals = [
+                lo if r < edges[1] else mid[r - edges[1]] if r < edges[2] else hi for r in ranks
+            ]
+            return float(np.mean(vals))
+        pad *= 4  # the sample missed the median (practically never): widen and recount
+
+
+def _mann_kendall(x: np.ndarray, hamed_rao: bool) -> tuple[str, float, float, str]:
+    """Mann-Kendall test (optionally with the Hamed-Rao 1998 variance correction for
+    autocorrelation) and the Sen slope, as pymannkendall computes them, in O(n log n)
+    time apart from the slope pass. Returns (trend, p, slope per step, method)."""
+    from scipy.stats import kendalltau, norm, rankdata
+
+    n = x.size
+    pairs = n * (n - 1) / 2
+    t = np.unique(x, return_counts=True)[1].astype("float64")  # int32 in the browser: overflows
+    ties = float(np.sum(t * (t - 1) / 2))
+    tau = kendalltau(np.arange(n), x).statistic  # tau-b: (P - Q) / sqrt(pairs (pairs - ties))
+    s = float(round(tau * np.sqrt(pairs * (pairs - ties)))) if pairs > ties else 0.0
+    var_s = (n * (n - 1) * (2.0 * n + 5) - float(np.sum(t * (t - 1) * (2 * t + 5)))) / 18
+    slope = _sen_slope(x)
+    method = "Mann-Kendall"
+    if hamed_rao:
+        r = rankdata(x - np.arange(1, n + 1) * slope)
+        r -= r.mean()
+        f = np.fft.rfft(r, 2 * n)
+        acov = np.fft.irfft(f * np.conj(f), 2 * n)[:n]
+        if acov[0] > 0:  # an exact straight line leaves no residual to correct
+            acf = acov[1:] / acov[0]
+            lag = np.arange(1, n, dtype="float64")
+            strong = np.abs(acf) > norm.ppf(0.975) / np.sqrt(n)
+            sni = np.sum(((n - lag) * (n - lag - 1) * (n - lag - 2) * acf)[strong])
+            corrected = var_s * (1 + 2 / (n * (n - 1) * (n - 2)) * sni)
+            if corrected > 0:
+                var_s, method = corrected, "Hamed-Rao modified Mann-Kendall"
+    z = (s - np.sign(s)) / np.sqrt(var_s) if var_s > 0 else 0.0
+    p = float(2 * norm.sf(abs(z)))
+    strong = abs(z) > norm.ppf(0.975)
+    return ("increasing" if z > 0 else "decreasing") if strong else "no trend", p, slope, method
+
+
 def trend(series: pd.Series, name: str, units: str = "") -> dict | None:
     """Linear slope per year + a Mann-Kendall-family test, described in plain words.
 
@@ -142,28 +237,25 @@ def trend(series: pd.Series, name: str, units: str = "") -> dict | None:
         "lag1_autocorr": round(r1, 3),
     }
     try:
-        import pymannkendall as mk
-
         step_days = float(pd.Series(s.index).diff().dt.total_seconds().median()) / 86400
         monthly = 27 <= step_days <= 32 and clim is not None
         # only positive autocorrelation inflates significance
         autocorrelated = r1 > 2 / np.sqrt(len(s))
         if seasonal and monthly and _complete_months(s):
-            res, method = mk.seasonal_test(y, period=12), "Seasonal Mann-Kendall"
-        elif autocorrelated and len(s) >= 10:
-            with np.errstate(invalid="ignore", divide="ignore"):
-                res = mk.hamed_rao_modification_test(anomalies)
-            method = "Hamed-Rao modified Mann-Kendall"
-            if not np.isfinite(res.p):  # an exact straight line leaves no residual to correct
-                res, method = mk.original_test(anomalies), "Mann-Kendall"
+            import pymannkendall as mk
+
+            res = mk.seasonal_test(y, period=12)
+            mk_trend, p, slope, method = res.trend, res.p, res.slope, "Seasonal Mann-Kendall"
         else:
-            res, method = mk.original_test(anomalies), "Mann-Kendall"
-        if seasonal and method != "Seasonal Mann-Kendall":
-            method += " on deseasonalized anomalies"
+            mk_trend, p, slope, method = _mann_kendall(
+                anomalies, hamed_rao=autocorrelated and len(s) >= 10
+            )
+            if seasonal:
+                method += " on deseasonalized anomalies"
         out.update(
-            mk_trend=res.trend,
-            mk_p=float(res.p),
-            sens_slope_per_step=float(res.slope),
+            mk_trend=mk_trend,
+            mk_p=float(p),
+            sens_slope_per_step=float(slope),
             method=method,
         )
     except ImportError:

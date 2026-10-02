@@ -19,6 +19,7 @@ pytestmark = pytest.mark.skipif(
 
 EXPECTED = {  # sample key -> reader expected inside the browser
     "csv": "delimited-text",
+    "daily_long_csv": "delimited-text",
     "xlsx": "excel",
     "json_nested": "json",
     "parquet": "parquet",

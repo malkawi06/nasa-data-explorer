@@ -113,6 +113,26 @@ def test_trend_wording():
     assert trend(pd.Series([1.0, 2.0], idx[:2]), "short") is None
 
 
+def test_mann_kendall_matches_pymannkendall_and_scales():
+    mk = pytest.importorskip("pymannkendall")
+    from nasa_explorer.analysis.stats import _mann_kendall, _sen_slope
+
+    rng = np.random.default_rng(2)
+    for x in (
+        rng.normal(size=300),
+        np.cumsum(rng.normal(size=500)) * 0.3 + np.arange(500) * 0.01,  # autocorrelated
+        np.round(rng.gamma(0.5, 3, 400) * (rng.random(400) < 0.3), 1),  # dry days: ties
+    ):
+        for hr, test in ((False, mk.original_test), (True, mk.hamed_rao_modification_test)):
+            ref = test(x)
+            got = _mann_kendall(x, hr)
+            assert got[0] == ref.trend and got[2] == ref.slope and abs(got[1] - ref.p) < 1e-9
+    # long series: the bracketed Sen slope is the exact median of all pairwise slopes
+    for x in (rng.normal(size=2200) + np.arange(2200) * 1e-3, rng.integers(0, 3, 2400) * 1.0):
+        d = np.concatenate([(x[k:] - x[:-k]) / k for k in range(1, x.size)])
+        assert _sen_slope(x) == np.median(d)
+
+
 def test_human_delta():
     assert human_delta(86400) == "1 day"
     assert human_delta(3600 * 3) == "3 hours"

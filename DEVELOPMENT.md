@@ -52,6 +52,9 @@ Generic "drop any NASA/scientific file in, get a report" tool for Space Apps hac
   - `pd.read_parquet` fails when pyarrow loads after pandas, so the reader uses
     `pyarrow.parquet` directly.
 
+  - Pyodide is 32-bit (wasm32): `np.intp` and counts from `np.unique`/`bincount` are int32, and
+    NumPy 2 refuses to mix them with large Python ints. Do sums of products in float64.
+
   Verify browser changes on real Pyodide with `E2E_PYODIDE=1`, not only the stubbed UI test.
 - The browser build has no pyogrio, pymupdf, eccodes or pyhdf. Readers must keep heavy imports
   inside the function and declare them in `requires`, so the registry disables them cleanly.
@@ -73,6 +76,10 @@ Generic "drop any NASA/scientific file in, get a report" tool for Space Apps hac
   (`grid._geographic_bounds`). PROJ refuses or silently mixes bodies otherwise.
 - Terrain numbers depend on pixel size: always report the baseline and compare DEMs only via
   `by_baseline_m` (same baseline).
+- Trends: `stats._mann_kendall` and `_sen_slope` reproduce pymannkendall's original and Hamed-Rao
+  tests exactly (tests compare them) without its O(n²) memory; pymannkendall is used only for the
+  seasonal test. Depression filling (`terrain._filled`) uses row/column sweeps, also checked
+  against plain erosion in the tests.
 - `tests/data/power/*.json` are real POWER climatology responses (2001-2020); the analog ranking
   tests rely on them, so do not replace them with synthetic data.
 - Tests force `NASA_EXPLORER_EMBEDDINGS=tfidf` and clear AI keys; AI is tested with a fake provider.

@@ -394,7 +394,17 @@ def analyze_grid(res: ReadResult, opts: ReadOptions) -> tuple[dict, list[tuple[s
                     plots.seasonal_cycle({main: clim}, "Mean annual cycle (area mean)"),
                 )
             )
-    if opts.plots and main:
+    relief, relief_figs = None, []
+    if main and terrain.is_elevation(str(meta.get("file_name", "")), str(main), ds[main]):
+        relief, relief_figs = terrain.analyze(ds, str(main), body, opts.plots)
+        if relief.get("note") and str(main) in stats:  # radii stored: show heights instead
+            ref = bodies.REFERENCE_RADIUS_M[body]
+            for k in ("min", "max", "mean", "p5", "p25", "p50", "p75", "p95"):
+                if isinstance(stats[str(main)].get(k), int | float):
+                    stats[str(main)][k] -= ref
+        if relief.get("note"):
+            notes.append(relief["note"])
+    if opts.plots and main and not relief_figs:  # a shaded relief replaces the plain map
         da = ds[main]
         arr, la, lo, fixed = _map_slice(da, ds, lat, lon)
         when = ", ".join(f"{k}[0]" for k in fixed) or "single field"
@@ -404,18 +414,7 @@ def analyze_grid(res: ReadResult, opts: ReadOptions) -> tuple[dict, list[tuple[s
         figs.insert(
             0, (f"Map: {main} ({when})", plots.grid_map(arr, la, lo, f"{main} - {when}", units))
         )
-    relief = None
-    if main and terrain.is_elevation(str(meta.get("file_name", "")), str(main), ds[main]):
-        relief, relief_figs = terrain.analyze(ds, str(main), body, opts.plots)
-        if relief.get("note") and str(main) in stats:  # radii stored: show heights instead
-            ref = bodies.REFERENCE_RADIUS_M[body]
-            for k in ("min", "max", "mean", "p5", "p25", "p50", "p75", "p95"):
-                if isinstance(stats[str(main)].get(k), int | float):
-                    stats[str(main)][k] -= ref
-        if relief_figs:  # the shaded relief replaces the plain overview map
-            figs[:] = relief_figs + [f for f in figs if not f[0].startswith("Map:")]
-        if relief.get("note"):
-            notes.append(relief["note"])
+    figs[:0] = relief_figs
     greens = None
     if (
         main
