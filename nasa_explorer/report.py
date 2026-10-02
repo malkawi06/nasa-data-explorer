@@ -13,6 +13,7 @@ from typing import Any
 import numpy as np
 from jinja2 import Template
 
+from . import ai_view
 from .i18n import labels
 
 CSS = """
@@ -35,6 +36,8 @@ img.plot{max-width:100%;border-radius:6px;border:1px solid var(--line)}
 pre.preview{white-space:pre-wrap;font-size:12px;color:var(--ink2);max-height:320px;overflow:auto}
 a{color:var(--accent)}
 """
+
+CSS += ai_view.CSS
 
 PAGE = Template("""<!doctype html>
 <html lang="{{ lang }}" dir="{{ 'rtl' if lang == 'ar' else 'ltr' }}"><head><meta charset="utf-8">
@@ -124,6 +127,9 @@ def render_body(rep: dict, plots: list[tuple[str, str, bytes]], lang: str) -> st
     ]
     if rep.get("error"):
         out.append(f"<div class='card'><b>Error:</b> {html.escape(rep['error'])}</div>")
+    out.append(ai_view.render_ai(rep.get("ai"), lang))
+    out.append(ai_view.render_quality(a.get("quality"), lang))
+    out.append(ai_view.render_products(a.get("products"), lang))
     if a.get("trends"):
         out.append(
             f"<h2>{L['trends']}</h2><div class='card'><ul>"
@@ -133,11 +139,8 @@ def render_body(rep: dict, plots: list[tuple[str, str, bytes]], lang: str) -> st
             )
             + "</ul></div>"
         )
-    if rep.get("ai"):
-        out.append(
-            f"<h2>{L['ai']}</h2><div class='card ai'><div class='meta'>{html.escape(rep['ai'].get('provider', ''))}"
-            f" / {html.escape(rep['ai'].get('model', ''))}</div>{_md(rep['ai']['text'])}</div>"
-        )
+    if a.get("trend_map"):
+        out.append(f"<div class='card'><b>Trend map</b>{to_html(a['trend_map'])}</div>")
     if plots:
         out.append(f"<h2>{L['plots']}</h2>")
         for title, fname, png in plots:

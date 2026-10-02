@@ -13,7 +13,8 @@ import logging
 import os
 import random
 import time
-from collections.abc import Callable
+from collections.abc import Callable, Generator
+from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING, Protocol
 
@@ -51,7 +52,7 @@ class Provider(Protocol):
     name: str
     model: str
 
-    def complete(self, prompt: str, system: str) -> str: ...
+    def complete(self, prompt: str, system: str, json_mode: bool = False) -> str: ...
 
 
 def estimate_tokens(text: str) -> int:
@@ -100,13 +101,14 @@ class Ollama:
             log.warning("Ollama model %s not pulled; using %s", self.model, names[0])
             self.model = names[0]
 
-    def complete(self, prompt: str, system: str) -> str:
+    def complete(self, prompt: str, system: str, json_mode: bool = False) -> str:
         resp = requests.post(
             f"{self.host}/api/chat",
             timeout=TIMEOUT * 3,
             json={
                 "model": self.model,
                 "stream": False,
+                **({"format": "json"} if json_mode else {}),
                 "options": {"temperature": 0.2},
                 "messages": [
                     {"role": "system", "content": system},
@@ -127,14 +129,18 @@ class Gemini:
         self.client = genai.Client(api_key=os.environ["GEMINI_API_KEY"])
         self.model = model or "gemini-2.5-flash"
 
-    def complete(self, prompt: str, system: str) -> str:
+    def complete(self, prompt: str, system: str, json_mode: bool = False) -> str:
         from google.genai import errors, types
 
         try:
             resp = self.client.models.generate_content(
                 model=self.model,
                 contents=prompt,
-                config=types.GenerateContentConfig(system_instruction=system, temperature=0.2),
+                config=types.GenerateContentConfig(
+                    system_instruction=system,
+                    temperature=0.2,
+                    response_mime_type="application/json" if json_mode else None,
+                ),
             )
         except errors.APIError as exc:
             if getattr(exc, "code", None) == 429:
@@ -151,7 +157,7 @@ class Groq:
         self.key = os.environ["GROQ_API_KEY"]
         self.model = model or "llama-3.3-70b-versatile"
 
-    def complete(self, prompt: str, system: str) -> str:
+    def complete(self, prompt: str, system: str, json_mode: bool = False) -> str:
         resp = requests.post(
             self.url,
             timeout=TIMEOUT,
@@ -159,6 +165,7 @@ class Groq:
             json={
                 "model": self.model,
                 "temperature": 0.2,
+                **({"response_format": {"type": "json_object"}} if json_mode else {}),
                 "messages": [
                     {"role": "system", "content": system},
                     {"role": "user", "content": prompt},
@@ -178,7 +185,7 @@ class Anthropic:
         self.client = anthropic.Anthropic(max_retries=0)  # we do our own backoff
         self.model = model or "claude-sonnet-5-5"
 
-    def complete(self, prompt: str, system: str) -> str:
+    def complete(self, prompt: str, system: str, json_mode: bool = False) -> str:
         import anthropic
 
         try:
@@ -245,9 +252,9 @@ class AIClient:
         self.verbose = verbose
         self.tokens_sent = 0
 
-    def ask(self, prompt: str, system: str = "") -> str:
+    def ask(self, prompt: str, system: str = "", json_mode: bool = False) -> str:
         key = hashlib.sha256(
-            f"{self.provider.name}|{self.provider.model}|{system}|{prompt}".encode()
+            f"{self.provider.name}|{self.provider.model}|{json_mode}|{system}|{prompt}".encode()
         ).hexdigest()
         path = cache_dir() / f"{key}.json"
         if path.exists():
@@ -257,7 +264,7 @@ class AIClient:
         est = estimate_tokens(system + prompt)
         if self.verbose:
             print(f"  [ai] {self.provider.name}/{self.provider.model}: ~{est:,} input tokens")
-        text = self._with_backoff(lambda: self.provider.complete(prompt, system))
+        text = self._with_backoff(lambda: self.provider.complete(prompt, system, json_mode))
         self.tokens_sent += est
         path.write_text(
             json.dumps(
@@ -283,36 +290,137 @@ class AIClient:
         raise RuntimeError("unreachable")
 
 
-# --- prompts ---------------------------------------------------------------------------
+# --- workflows -------------------------------------------------------------------------
+# Each workflow is a generator: it yields Step prompts and receives the model's reply.
+# The CLI drives it with AIClient (run_workflow); the browser drives the same generator
+# through web/bridge.py and calls the provider from JavaScript (bring-your-own-key).
+
+
+@dataclass
+class Step:
+    label: str
+    system: str
+    prompt: str
+    json_mode: bool = True
+
+    @property
+    def tokens(self) -> int:
+        return estimate_tokens(self.system + self.prompt)
+
+
+Workflow = Generator[Step, str, dict]
+
+SYSTEM = (
+    "You are a careful NASA Earth & space science data analyst helping a hackathon team. "
+    "Be concrete and quantitative, never invent numbers, and say when something is uncertain."
+)
 
 
 def _lang_rule(lang: str) -> str:
     return (
-        "Write the entire answer in Arabic (Modern Standard Arabic); keep variable names, units and mission names in English."
+        "Write every text value in Arabic (Modern Standard Arabic); keep JSON keys, variable names, "
+        "units, numbers and mission names in English."
         if lang == "ar"
-        else "Write in clear English."
+        else "Write in clear, plain English."
     )
 
 
-SYSTEM = (
-    "You are a careful NASA Earth & space science data analyst helping a hackathon team. "
-    "Be concrete, quantitative and honest about uncertainty. Use Markdown headings and bullet points."
-)
+DATA_SCHEMA = """{
+  "overview": "2-4 sentences: what this data is and what it shows",
+  "findings": [{"text": "one finding with its number", "value": <number or null>, "fact": "<exact fact path or null>"}],
+  "quality_issues": [{"text": "problem and why it matters", "severity": "high|medium|low"}],
+  "next_analyses": ["concrete analysis to run next"],
+  "visualizations": ["chart/map that would work in a demo"],
+  "hackathon_ideas": ["idea that uses this data"],
+  "caveats": ["limitation of the data or of these statistics"]
+}"""
 
 
-def explain_data(analysis: dict, file: str, reader: str, lang: str, client: AIClient) -> str:
-    brief = {k: analysis.get(k) for k in ("summary", "coverage", "statistics", "trends", "notes")}
-    payload = json.dumps(brief, default=str)[:24000]
-    prompt = f"""File: {file} (format: {reader}). Below is ONLY the computed summary and statistics - not the raw data.
+def _data_context(analysis: dict, file: str, reader: str) -> tuple[str, dict]:
+    from . import verify
 
-{payload}
+    f = verify.facts(analysis)
+    s = analysis.get("summary", {})
+    variables = s.get("variables") or s.get("columns") or s.get("datasets") or []
+    var_lines = [
+        f"- {v.get('name', v.get('path'))}: {v.get('long_name', '')} [{v.get('units', '')}] dtype={v.get('dtype', '')}"
+        for v in variables[:40]
+        if isinstance(v, dict)
+    ]
+    quality = [f"- [{q['level']}] {q['message']}" for q in analysis.get("quality", [])]
+    products = [
+        f"- {p['name']} ({p['resolution']}): " + " ".join(p["caveats"])
+        for p in analysis.get("products", [])
+    ]
+    context = f"""FILE: {file} (format: {reader})
 
-Explain:
-1. What this data is and what it shows, in plain language.
-2. Anything suspicious (fill values left in, impossible ranges, gaps, odd units, outliers, sampling).
-3. Next analyses worth running and the best visualizations for a hackathon demo.
-{_lang_rule(lang)}"""
-    return client.ask(prompt, SYSTEM)
+VARIABLES / COLUMNS:
+{chr(10).join(var_lines) or "- (none)"}
+
+FACTS (computed by the tool; cite these exact paths):
+{verify.facts_text(f)}
+
+AUTOMATIC QUALITY CHECKS (trusted):
+{chr(10).join(quality) or "- none raised"}
+
+RECOGNISED NASA PRODUCT (trusted reference notes):
+{chr(10).join(products) or "- not recognised"}
+
+NOTES: {"; ".join(analysis.get("notes", [])) or "none"}"""
+    return context, f
+
+
+def data_workflow(analysis: dict, file: str, reader: str, lang: str) -> Workflow:
+    """Draft -> verify every number against the facts -> one review round if needed."""
+    from . import verify
+
+    context, f = _data_context(analysis, file, reader)
+    rules = (
+        "Rules: only the summary below was computed - you never see the raw data. Every finding that "
+        'contains a number MUST set "fact" to one exact path from FACTS and "value" to that number. '
+        "Do not compute new numbers except simple unit conversions you state explicitly. "
+        "Reflect the automatic quality checks and product notes in quality_issues/caveats."
+    )
+    raw = yield Step(
+        "draft",
+        SYSTEM,
+        f"{context}\n\n{rules}\nReturn ONLY JSON with this shape:\n{DATA_SCHEMA}\n{_lang_rule(lang)}",
+    )
+    result = verify.parse_json(raw)
+    if result is None:
+        return {"kind": "data", "parse_error": True, "raw": raw, "rounds": 1}
+    verify.verify_data(result, f)
+    problems = verify.review_problems(result)
+    rounds = 1
+    if problems:
+        fix = yield Step(
+            "review",
+            SYSTEM,
+            (
+                f"{context}\n\nYour previous answer:\n{json.dumps(result, ensure_ascii=False)}\n\n"
+                "An automatic checker found these problems:\n- "
+                + "\n- ".join(problems)
+                + "\n\nReturn the corrected full JSON (same shape). Fix or drop each flagged claim; "
+                f"cite exact FACTS paths. {_lang_rule(lang)}"
+            ),
+        )
+        fixed = verify.parse_json(fix)
+        if fixed is not None:
+            result, rounds = verify.verify_data(fixed, f), 2
+            result["fixed_in_review"] = len(problems) - len(verify.review_problems(result))
+    result.update(kind="data", rounds=rounds)
+    return result
+
+
+PAPER_SCHEMA = """{
+  "problem": [{"text": "...", "page": <int>, "quote": "short exact quote"}],
+  "method": [{"text": "...", "page": <int>, "quote": "..."}],
+  "data_used": [{"text": "...", "page": <int>, "quote": "..."}],
+  "findings": [{"text": "finding with exact numbers", "page": <int>, "quote": "exact sentence containing the numbers"}],
+  "limitations": [{"text": "...", "page": <int>, "quote": "..."}],
+  "nasa_datasets": [{"name": "mission/dataset", "how_used": "...", "page": <int>}],
+  "hackathon_ideas": ["5 ideas for using this paper in a NASA Space Apps project"]
+}"""
 
 
 def _page_chunks(pages: list[str], max_tokens: int | None = None) -> list[str]:
@@ -329,49 +437,101 @@ def _page_chunks(pages: list[str], max_tokens: int | None = None) -> list[str]:
     return chunks
 
 
-def summarize_paper(pages: list[str], title: str, lang: str, client: AIClient) -> str:
-    """Map-reduce summary; every claim must cite (p. N)."""
+def paper_workflow(pages: list[str], title: str, lang: str) -> Workflow:
+    """Map-reduce over page-tagged chunks; every claim cites a page and is checked against it."""
+    from . import verify
+
     chunks = _page_chunks(pages)
-    cite = "Cite the page for every claim as (p. N) using the [page N] markers."
+    cite = (
+        "Every item must cite the page from the [page N] markers and include a short exact quote."
+    )
     if len(chunks) > 1:
         notes = []
         for i, ch in enumerate(chunks, 1):
-            print(f"  [ai] map step {i}/{len(chunks)}")
             notes.append(
-                client.ask(
-                    f"Extract from this part of the paper '{title}': problem, methods, data/missions used, key findings "
-                    f"with exact numbers, limitations. {cite} Use terse bullet points in English.\n\n{ch}",
-                    SYSTEM,
+                (
+                    yield Step(
+                        f"map {i}/{len(chunks)}",
+                        SYSTEM,
+                        (
+                            f"Extract from this part of the paper '{title}': problem, methods, data/missions used, key findings "
+                            f"with exact numbers, limitations. Terse English bullet points, each ending with (p. N) and an exact quote.\n\n{ch}"
+                        ),
+                        json_mode=False,
+                    )
                 )
             )
         material = "\n\n".join(f"## Notes from part {i}\n{n}" for i, n in enumerate(notes, 1))
     else:
         material = chunks[0] if chunks else ""
-    prompt = f"""Paper: {title}
+    raw = yield Step(
+        "summary",
+        SYSTEM,
+        (
+            f"Paper: {title} ({len(pages)} pages)\n\n{material}\n\n{cite} Do not invent facts. "
+            f"Return ONLY JSON with this shape:\n{PAPER_SCHEMA}\n{_lang_rule(lang)}"
+        ),
+    )
+    result = verify.parse_json(raw)
+    if result is None:
+        return {"kind": "paper", "parse_error": True, "raw": raw, "rounds": 1}
+    verify.verify_paper(result, pages)
+    rounds = 1
+    if (problems := verify.review_problems(result)) and len(chunks) == 1:
+        fix = yield Step(
+            "review",
+            SYSTEM,
+            (
+                f"Paper text:\n{material}\n\nYour previous answer:\n{json.dumps(result, ensure_ascii=False)}\n\n"
+                "A checker could not find these claims on the cited pages:\n- "
+                + "\n- ".join(problems)
+                + f"\n\nReturn the corrected full JSON: fix the page/quote, or drop the claim. {_lang_rule(lang)}"
+            ),
+        )
+        fixed = verify.parse_json(fix)
+        if fixed is not None:
+            result, rounds = verify.verify_paper(fixed, pages), 2
+    result.update(kind="paper", rounds=rounds)
+    return result
 
-{material}
 
-Produce a structured summary with these sections:
-## Problem
-## Method
-## Data used
-## Key findings (with numbers)
-## Limitations
-## NASA datasets / missions mentioned (with how they were used)
-## 5 ideas for using this paper in a NASA Space Apps hackathon project
-{cite} Do not invent facts that are not in the text. {_lang_rule(lang)}"""
-    return client.ask(prompt, SYSTEM)
+def chat_workflow(question: str, context: str, lang: str) -> Workflow:
+    answer = yield Step(
+        "chat",
+        SYSTEM,
+        (
+            f"{context}\n\nQuestion: {question}\n\nAnswer only from the material above. Cite fact paths "
+            f"like [statistics.t2m.mean] or pages like [p. 3]. If the material does not contain the answer, say so. "
+            f"{_lang_rule(lang)}"
+        ),
+        json_mode=False,
+    )
+    return {"kind": "chat", "answer": answer}
+
+
+def run_workflow(workflow: Workflow, client: AIClient) -> dict:
+    try:
+        step = next(workflow)
+        while True:
+            if client.verbose:
+                print(f"  [ai] step: {step.label}")
+            step = workflow.send(client.ask(step.prompt, step.system, step.json_mode))
+    except StopIteration as done:
+        return done.value
+
+
+def workflow_for(rep: FileReport, res: ReadResult, lang: str) -> Workflow:
+    if res.kind == "document":
+        return paper_workflow(res.pages, res.metadata.get("title") or rep.file, lang)
+    return data_workflow(rep.analysis, rep.file, rep.reader, lang)
 
 
 def interpret(rep: FileReport, res: ReadResult, lang: str) -> dict | None:
     """Called by the pipeline with --ai. Never raises: AI problems become a note."""
     try:
         client = AIClient()
-        if res.kind == "document":
-            text = summarize_paper(res.pages, res.metadata.get("title") or rep.file, lang, client)
-        else:
-            text = explain_data(rep.analysis, rep.file, rep.reader, lang, client)
-        return {"provider": client.provider.name, "model": client.provider.model, "text": text}
+        result = run_workflow(workflow_for(rep, res, lang), client)
+        return {"provider": client.provider.name, "model": client.provider.model, **result}
     except Exception as exc:
         rep.analysis.setdefault("notes", []).append(f"AI layer skipped: {exc}")
         return None
