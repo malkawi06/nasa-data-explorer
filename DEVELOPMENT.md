@@ -1,4 +1,4 @@
-# nasa-data-explorer
+# nasa-data-explorer: development notes
 
 Generic "drop any NASA/scientific file in, get a report" tool for Space Apps hackathons.
 
