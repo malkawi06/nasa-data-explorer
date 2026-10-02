@@ -44,4 +44,43 @@ def test_build_bundles_package(tmp_path, monkeypatch):
     bundle = build.build()
     names = zipfile.ZipFile(bundle).namelist()
     assert "bridge.py" in names and "nasa_explorer/readers/netcdf.py" in names
-    assert {"index.html", "app.js", "style.css"} <= {p.name for p in (tmp_path / "dist").iterdir()}
+    assert {"index.html", "app.js", "ai.js", "style.css"} <= {
+        p.name for p in (tmp_path / "dist").iterdir()
+    }
+
+
+def _run(tmp_path, monkeypatch, files):
+    monkeypatch.setattr(bridge, "WORK", tmp_path)
+    src = Path(bridge.new_run("ai"))
+    for f in files:
+        shutil.copy(f, src)
+    return {
+        r["file"]: r for r in json.loads(bridge.analyse_dir(str(src), json.dumps({"lang": "en"})))
+    }
+
+
+def test_ai_job_round_trip_updates_report(samples, tmp_path, monkeypatch):
+    res = _run(tmp_path, monkeypatch, [samples["netcdf4"][0]])["grid.nc"]
+    first = json.loads(bridge.ai_start(res["key"], "en", "gemini", "gemini-2.5-flash"))
+    step = first["step"]
+    assert step["json"] and step["tokens"] > 100 and "statistics.t2m.mean" in step["prompt"]
+    reply = {
+        "overview": "grid",
+        "findings": [{"text": "warming", "value": 999, "fact": "trends.t2m.slope_per_year"}],
+    }
+    second = json.loads(bridge.ai_next(first["job"], json.dumps(reply)))
+    assert second["step"]["label"] == "review"  # the wrong number triggers one review round
+    reply["findings"] = []
+    done = json.loads(bridge.ai_next(second["job"], json.dumps(reply)))
+    assert done["done"] and "ai-panel" in done["panel"] and "gemini" in done["html"]
+    assert json.loads(done["json"])["ai"]["rounds"] == 2
+
+
+def test_chat_on_document_uses_relevant_pages(samples, tmp_path, monkeypatch):
+    res = _run(tmp_path, monkeypatch, [samples["pdf"][0]])["paper.pdf"]
+    first = json.loads(
+        bridge.chat_start(res["key"], "Which precipitation data (IMERG) was used?", "ar")
+    )
+    assert "[page 2]" in first["step"]["prompt"] and "Arabic" in first["step"]["prompt"]
+    done = json.loads(bridge.ai_next(first["job"], "GPM IMERG [p. 2]"))
+    assert done == {"job": first["job"], "done": True, "answer": "GPM IMERG [p. 2]"}
