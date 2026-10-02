@@ -8,7 +8,7 @@ const MAX_MB = 600; // wasm32 memory is limited; larger files are better run wit
 
 // Always-needed Pyodide packages and pure-Python wheels from PyPI.
 const CORE = {
-  pkgs: ["micropip", "numpy", "pandas", "xarray", "scipy", "matplotlib", "jinja2", "h5py", "netcdf4", "cftime", "pillow", "xlrd"],
+  pkgs: ["micropip", "numpy", "pandas", "xarray", "scipy", "matplotlib", "jinja2", "h5py", "netcdf4", "cftime", "pillow", "xlrd", "requests"],
   pip: ["pymannkendall", "h5netcdf", "openpyxl", "markdown"],
 };
 // Optional readers: module name used in the reader's `requires` -> what provides it.

@@ -50,7 +50,9 @@ def test_formats_in_real_pyodide(samples, tmp_path):
             errors: list[str] = []
             page.on("pageerror", lambda e: errors.append(str(e)))
             page.goto(f"{server.url}/index.html")
-            page.wait_for_selector(".dot.ready", timeout=420_000)
+            page.wait_for_selector(".dot.ready, .dot.error", timeout=420_000)
+            status = page.inner_text("#status-text")
+            assert page.locator(".dot.ready").count(), f"Pyodide failed to start: {status}"
             page.set_input_files("#file-input", files)
             n_cards = sum(k in samples for k in EXPECTED) + (1 if shp else 0)
             page.wait_for_function(
