@@ -287,6 +287,8 @@ def analyze_table(res: ReadResult, opts: ReadOptions) -> tuple[dict, list[tuple[
         ).mean()
         for c in [c for c in numeric if df[c].nunique() > 2][:MAX_TREND_COLS]:  # not 0/1 flags
             if t := trend(per_date[c], str(c)):
+                if event_info is not None:  # a daily mean of a few events is noise, not news
+                    t["extremes"] = []
                 trends.append(t)
         if opts.plots and len(per_date) > 1 and event_info is None:
             lines = {t["variable"]: (t["slope_per_year"], t["intercept"]) for t in trends}

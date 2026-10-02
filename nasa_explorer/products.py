@@ -42,7 +42,7 @@ CATALOG: tuple[Product, ...] = (
     Product(
         "power",
         "NASA POWER meteorology / solar point data",
-        r"nasa/power|power\.larc|-begin header-",
+        r"nasa/power|nasa power|power\.larc|-begin header-",
         frozenset(),
         "0.5° × 0.625° (MERRA-2) / 1° (CERES) grid cell, not a station",
         (
@@ -69,7 +69,7 @@ CATALOG: tuple[Product, ...] = (
     Product(
         "mod13",
         "MODIS Vegetation Indices NDVI/EVI (MOD13/MYD13)",
-        r"m[oy]d13",
+        r"m[oy]d13|modis.{0,20}ndvi|ndvi.{0,20}modis",
         resolution="250 m-1 km, 16-day composites",
         caveats=(
             "Scale factor 0.0001 (valid -2000..10000 raw).",
@@ -380,6 +380,7 @@ def _haystack(file: str, analysis: dict) -> str:
         str(s.get("root_attributes", "")),
         s.get("header_text", ""),
         str(s.get("title", "")),
+        " ".join(s.get("nasa_mentions", {})),  # papers: the datasets they use
     ]
     return " ".join(parts).lower()
 

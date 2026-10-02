@@ -145,6 +145,10 @@ def _headline(kind: str, a: dict) -> str:
         if dep.get("count") is not None:
             bits.append(f"{dep['count']} crater-like depressions")
         parts.append(", ".join(bits))
+    elif veg := a.get("vegetation"):
+        parts.append(
+            f"NDVI mean {veg['mean']:g}, bare ground (<0.1) {veg['share_pct']['bare_0_0.1']:g}%"
+        )
     elif a.get("trends"):
         t0 = a["trends"][0]
         parts.append(f"{t0['variable']}: {t0['text'].split(';')[0]}")

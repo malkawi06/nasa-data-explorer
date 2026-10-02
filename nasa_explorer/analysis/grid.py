@@ -10,7 +10,7 @@ import xarray as xr
 
 from .. import analog, bodies, plots
 from ..core import ReadOptions, ReadResult
-from . import terrain
+from . import terrain, vegetation
 from .stats import MAX_SAMPLE, anomalies, numeric_stats, seasonal_cycle, time_coverage, trend
 
 LAT_NAMES = {"lat", "latitude", "nav_lat", "lats", "xlat", "lat_0", "gridlat_0"}
@@ -407,10 +407,24 @@ def analyze_grid(res: ReadResult, opts: ReadOptions) -> tuple[dict, list[tuple[s
     relief = None
     if main and terrain.is_elevation(str(meta.get("file_name", "")), str(main), ds[main]):
         relief, relief_figs = terrain.analyze(ds, str(main), body, opts.plots)
+        if relief.get("note") and str(main) in stats:  # radii stored: show heights instead
+            ref = bodies.REFERENCE_RADIUS_M[body]
+            for k in ("min", "max", "mean", "p5", "p25", "p50", "p75", "p95"):
+                if isinstance(stats[str(main)].get(k), int | float):
+                    stats[str(main)][k] -= ref
         if relief_figs:  # the shaded relief replaces the plain overview map
             figs[:] = relief_figs + [f for f in figs if not f[0].startswith("Map:")]
         if relief.get("note"):
             notes.append(relief["note"])
+    greens = None
+    if (
+        main
+        and not relief
+        and vegetation.is_ndvi(str(meta.get("file_name", "")), str(main), ds[main])
+    ):
+        greens = vegetation.analyze(strided(ds[main]).values)
+        if greens.get("note"):
+            notes.append(greens["note"])
     out = {
         "summary": summary,
         "coverage": coverage,
@@ -421,6 +435,15 @@ def analyze_grid(res: ReadResult, opts: ReadOptions) -> tuple[dict, list[tuple[s
         "trend_map": trend_map,
         "body": body,
     }
+    if greens and "mean" in greens:
+        out["vegetation"] = greens
+        if body == "Earth":
+            feats = {"ndvi": greens["mean"]}
+            out["analog"] = {
+                "features": feats,
+                "scores": analog.score_all(feats),
+                "partial": "vegetation",
+            }
     if relief:
         out["terrain"] = relief
         if body == "Earth":  # terrain half of the analog score; climate comes from POWER

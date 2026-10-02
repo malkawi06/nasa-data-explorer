@@ -206,16 +206,28 @@ def _coverage_checks(kind: str, analysis: dict) -> list[dict]:
                 "tell a long-term trend from the seasonal cycle",
             )
         )
-    for tr in analysis.get("trends", []):
-        if tr.get("seasonal"):
-            out.append(
-                _issue(
-                    "info",
-                    "seasonal",
-                    tr["variable"],
-                    f"{tr['variable']}: strong annual cycle (explains {_pct(tr['seasonal_strength'])} of variance); trend computed on deseasonalized values",
-                )
+    trends = analysis.get("trends", [])
+    if seasonal := [t for t in trends if t.get("seasonal")]:  # one line, not one per variable
+        names = ", ".join(f"{t['variable']} ({_pct(t['seasonal_strength'])})" for t in seasonal)
+        out.append(
+            _issue(
+                "info",
+                "seasonal",
+                None,
+                f"strong annual cycle, so trends use deseasonalized values (share of variance): {names}",
             )
+        )
+    if acf := [t for t in trends if "Hamed-Rao" in t.get("method", "")]:
+        names = ", ".join(f"{t['variable']} (r={t['lag1_autocorr']:.2f})" for t in acf)
+        out.append(
+            _issue(
+                "info",
+                "autocorrelated",
+                None,
+                f"autocorrelated series, p-values corrected with Hamed-Rao (lag-1 r): {names}",
+            )
+        )
+    for tr in trends:
         if tr.get("extremes"):
             ex = ", ".join(
                 f"{e['date']} ({e['anomaly']:+.3g} {tr.get('units', '')}, {e['z']:+.1f}σ)".replace(
@@ -229,15 +241,6 @@ def _coverage_checks(kind: str, analysis: dict) -> list[dict]:
                     "extremes",
                     tr["variable"],
                     f"{tr['variable']}: unusual periods vs the normal for that time of year: {ex}",
-                )
-            )
-        if "Hamed-Rao" in tr.get("method", ""):
-            out.append(
-                _issue(
-                    "info",
-                    "autocorrelated",
-                    tr["variable"],
-                    f"{tr['variable']}: autocorrelated (lag-1 r={tr['lag1_autocorr']:.2f}); p-value corrected with Hamed-Rao",
                 )
             )
     return out
@@ -296,10 +299,12 @@ def check(kind: str, analysis: dict) -> list[dict]:
         issues = _document_checks(analysis)
     elif kind in ("grid", "table", "tree", "image"):
         units = _units_by_var(analysis)
+        dem = (analysis.get("terrain") or {}).get("variable")
         issues = [
             i
             for name, st in analysis.get("statistics", {}).items()
             for i in _value_checks(name, st, units.get(name, ""), kind)
+            if not (name == dem and i["code"] == "outliers")  # craters and peaks are real
         ]
         issues += _coverage_checks(kind, analysis)
         if kind == "table" and analysis.get("summary", {}).get("n_rows") == 0:

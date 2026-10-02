@@ -261,3 +261,67 @@ def test_bridge_analog_run_uses_local_dem(tmp_path, monkeypatch):
     assert top["features"]["depressions_per_1000_km2"] is not None  # terrain from the analysed DEM
     assert payload["analysis"]["ranking"]["ranking"][1]["score"] is None
     assert json.loads(bridge.analog_sites())["sites"][0]["name"].startswith("Atacama")
+
+
+def test_renamed_hgt_tile_and_binary_is_not_text(tmp_path):
+    from nasa_explorer.registry import looks_like_text
+
+    z = (800 + _bowl(1201, (600, 600), 9, 120)).astype(">i2")
+    z.tofile(tmp_path / "03_SRTM_N29E035 (1).hgt")  # renamed download: GDAL would refuse it
+    rep = process_file(
+        tmp_path / "03_SRTM_N29E035 (1).hgt", ReadOptions(plots=False), tmp_path / "r"
+    )
+    assert rep.reader == "srtm-hgt"
+    dep = rep.analysis["terrain"]["depressions"]["largest"][0]
+    assert dep["lat"] == pytest.approx(29.5, abs=0.01) and dep["lon"] == pytest.approx(
+        35.5, abs=0.01
+    )
+    assert not looks_like_text(z.tobytes()[:4096])
+    assert looks_like_text("Temperature, ° and Arabic درجة\tok\n".encode())
+
+
+def test_ndvi_raster_gets_vegetation_shares(tmp_path):
+    ndvi = np.clip(RNG.normal(0.05, 0.03, (200, 200)), -0.2, 1) * 10000  # MODIS stores NDVI x 10000
+    _tif(tmp_path / "MOD13Q1_NDVI.tif", ndvi.astype("int16"), "EPSG:4326", 0.0025, (35.0, 30.0))
+    a = process_file(
+        tmp_path / "MOD13Q1_NDVI.tif", ReadOptions(plots=False), tmp_path / "r"
+    ).analysis
+    veg = a["vegetation"]
+    assert veg["mean"] == pytest.approx(0.05, abs=0.01)
+    assert veg["share_pct"]["bare_0_0.1"] > 80
+    assert (
+        a["analog"]["partial"] == "vegetation"
+        and a["analog"]["scores"]["mars_low_latitude"]["score"] == 100
+    )
+
+
+def test_paper_facts():
+    from nasa_explorer.readers import _paper
+
+    pages = [
+        "A Study of Analogs\nA. Author, B. Author\ndoi:10.1029/2026JE000123\nAbstract\n"
+        "Mean annual precipitation is 39 mm and humidity is 42% over 2001-2020, which makes the site "
+        "a strong analog.\n1. Introduction\nText.",
+        "2. Data\nThe site at 29.57 N, 35.42 E was studied. Trends were not significant (p = 0.34). "
+        "Data are available at https://power.larc.nasa.gov.\nReferences\n[1] McKay (2003). doi:10.1016/x\n[2] Lee (2007).",
+    ]
+    f = _paper.paper_facts(pages)
+    assert f["doi"] == "10.1029/2026JE000123"
+    assert f["abstract"].startswith("Mean annual precipitation is 39 mm")
+    assert {"39 mm", "42%"} <= set(f["key_numbers"][0]["values"])
+    assert any("p = 0.34" in n["values"] for n in f["key_numbers"])
+    assert f["coordinates"][0]["lat"] == 29.57 and f["coordinates"][0]["lon"] == 35.42
+    assert f["study_period"] == {"start": 2001, "end": 2020, "mentions": 1}
+    assert f["references"]["count"] == 2 and f["data_availability"][0]["page"] == 2
+
+
+def test_planetary_radius_stats_and_grouped_quality(tmp_path):
+    n = 128
+    dn = np.round((_bowl(n, (64, 64), 20, 80) + RNG.normal(0, 0.5, (n, n))) / 0.5).astype("int16")
+    path = _tif(tmp_path / "LDEM_test.tif", dn, MOON, 20.0, (-1280, 1280))
+    with rasterio.open(path, "r+") as d:
+        d.scales, d.offsets = (0.5,), (1737400.0,)
+    a = process_file(path, ReadOptions(plots=False), tmp_path / "r").analysis
+    st = a["statistics"][a["terrain"]["variable"]]
+    assert abs(st["p50"]) < 5 and st["min"] < -60  # heights, not radii
+    assert "outliers" not in {q["code"] for q in a["quality"]}  # craters are not outliers

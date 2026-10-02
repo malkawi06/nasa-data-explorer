@@ -551,6 +551,9 @@ def paper_workflow(pages: list[str], title: str, lang: str) -> Workflow:
     from . import verify
 
     chunks = _page_chunks(pages)
+    from .readers._paper import key_numbers
+
+    anchors = "\n".join(f"- p. {n['page']}: {n['text']}" for n in key_numbers(pages)[:25])
     cite = (
         "Every item must cite the page from the [page N] markers and include a short exact quote."
     )
@@ -577,7 +580,9 @@ def paper_workflow(pages: list[str], title: str, lang: str) -> Workflow:
         "summary",
         SYSTEM,
         (
-            f"Paper: {title} ({len(pages)} pages)\n\n{material}\n\n{cite} Do not invent facts. "
+            f"Paper: {title} ({len(pages)} pages)\n\n{material}\n\n"
+            f"SENTENCES WITH NUMBERS (found by the tool, with their pages):\n{anchors or '- none'}\n\n"
+            f"{cite} Prefer these exact sentences as quotes for findings. Do not invent facts. "
             f"Return ONLY JSON with this shape:\n{PAPER_SCHEMA}\n{_lang_rule(lang)}"
         ),
     )

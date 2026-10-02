@@ -10,6 +10,7 @@ import numpy as np
 
 from .. import plots
 from ..core import ReadOptions, ReadResult
+from ..readers import _paper
 from ..readers._cf import clean_attrs, decode
 from . import image_metrics
 from .stats import MAX_SAMPLE, numeric_stats
@@ -103,6 +104,7 @@ def analyze_document(res: ReadResult, opts: ReadOptions):
         "nasa_mentions": m.get("nasa_mentions", {}),
         "keywords": keywords,
         "ocr": m.get("ocr"),  # None for formats that cannot be scans (text, html, docx)
+        **_paper.paper_facts(res.pages),
     }
     notes = list(m.get("notes", []))
     if m.get("page_note"):

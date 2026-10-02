@@ -139,6 +139,10 @@ def looks_like_text(head: bytes) -> bool:
         return False
     if b"\x00" in head:
         return False
+    # binary data can be valid UTF-8 byte by byte (e.g. SRTM heights 0x03 0x20 ...); text has
+    # almost no control characters besides tab, newline, form feed and carriage return
+    if sum(b < 9 or 13 < b < 32 or b == 127 for b in head) > 0.01 * len(head):
+        return False
     try:
         head.decode("utf-8")
     except UnicodeDecodeError as exc:
@@ -148,7 +152,6 @@ def looks_like_text(head: bytes) -> bool:
                 head.decode("latin-1")
             except UnicodeDecodeError:
                 return False
-            return sum(b < 9 or 13 < b < 32 for b in head) == 0
     return True
 
 

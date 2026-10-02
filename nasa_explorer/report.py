@@ -330,6 +330,53 @@ def _measurements(m: dict, L: dict) -> str:
     )
 
 
+PAPER_KEYS = (
+    "doi",
+    "abstract",
+    "key_numbers",
+    "coordinates",
+    "study_period",
+    "references",
+    "data_availability",
+)
+
+
+def _paper(s: dict, L: dict) -> str:
+    out = []
+    if d := s.get("doi"):
+        q = html.escape(d)
+        out.append(
+            f"<p><b>DOI</b> <a href='https://doi.org/{q}' target='_blank' rel='noopener'>{q}</a> · "
+            f"<a href='https://api.openalex.org/works/https://doi.org/{q}' target='_blank' rel='noopener'>OpenAlex</a>"
+            f" <span class='muted small'>({html.escape(L['doi_hint'])})</span></p>"
+        )
+    if ab := s.get("abstract"):
+        out.append(f"<h3>{L['abstract']}</h3><div class='card'><p>{html.escape(ab)}</p></div>")
+    if nums := s.get("key_numbers"):
+        rows = [
+            {"p.": n["page"], L["values"]: ", ".join(n["values"]), L["sentence"]: n["text"]}
+            for n in nums
+        ]
+        out.append(f"<h3>{L['key_numbers']}</h3><div class='card'>{to_html(rows)}</div>")
+    facts = {}
+    if per := s.get("study_period"):
+        facts[L["study_period"]] = f"{per['start']}-{per['end']}"
+    if coords := s.get("coordinates"):
+        facts[L["coordinates"]] = "; ".join(
+            f"{c['lat']:g}, {c['lon']:g} (p. {c['page']})" for c in coords[:8]
+        )
+    if (ref := s.get("references")) and ref.get("count"):
+        facts[L["references"]] = f"{ref['count']} ({ref.get('dois', 0)} DOI)"
+    if facts:
+        out.append(f"<div class='card'>{to_html(facts)}</div>")
+    if coords:
+        out.append(f"<p class='muted small'>{html.escape(L['coords_hint'])}</p>")
+    if avail := s.get("data_availability"):
+        rows = [{"p.": a["page"], L["sentence"]: a["text"]} for a in avail]
+        out.append(f"<h3>{L['data_availability']}</h3><div class='card'>{to_html(rows)}</div>")
+    return "".join(out)
+
+
 def _no_hist(d: dict) -> dict:
     return {k: v for k, v in d.items() if k != "slope_hist"}
 
@@ -385,8 +432,8 @@ def _factor_rows(factors: list[dict], L: dict) -> list[dict]:
 
 def _analog(an: dict, L: dict) -> str:
     out = []
-    if an.get("partial") == "terrain":
-        out.append(f"<p class='muted'>{html.escape(L['partial_terrain'])}</p>")
+    if an.get("partial"):
+        out.append(f"<p class='muted'>{html.escape(L['partial_' + an['partial']])}</p>")
     rows = []
     for key, sc in an.get("scores", {}).items():
         rows.append(
@@ -467,6 +514,8 @@ def render_body(rep: dict, plots: list[tuple[str, str, bytes]], lang: str) -> st
         ]
         body += _fold(L["details"], f"<div class='card'>{to_html(rows)}</div>")
         sections.append(("trends", L["trends"], _section("trends", L["trends"], body)))
+    if rep.get("kind") == "document" and (paper := _paper(a.get("summary", {}), L)):
+        sections.append(("paper", L["paper"], _section("paper", L["paper"], paper)))
     if a.get("ranking"):
         sections.append(
             ("ranking", L["ranking"], _section("ranking", L["ranking"], _ranking(a["ranking"], L)))
@@ -486,6 +535,12 @@ def render_body(rep: dict, plots: list[tuple[str, str, bytes]], lang: str) -> st
                     f"<div class='card'>{to_html(a['terrain_analogs'])}</div>",
                 ),
             )
+        )
+    if veg := a.get("vegetation"):
+        shares = {k: f"{v:g}%" for k, v in veg["share_pct"].items()}
+        body = f"<div class='card'>{to_html({'mean': veg['mean'], 'median': veg['median']})}{to_html(shares)}</div>"
+        sections.append(
+            ("vegetation", L["vegetation"], _section("vegetation", L["vegetation"], body))
         )
     if a.get("analog"):
         sections.append(
@@ -526,7 +581,15 @@ def render_body(rep: dict, plots: list[tuple[str, str, bytes]], lang: str) -> st
         )
         if s.get(key)
     ]
-    for key in ("variables", "columns", "datasets", "tables", "figure_captions", "sections"):
+    for key in (
+        "variables",
+        "columns",
+        "datasets",
+        "tables",
+        "figure_captions",
+        "sections",
+        *PAPER_KEYS,
+    ):
         s.pop(key, None)
     mentions = s.pop("nasa_mentions", None)
     body = ""
