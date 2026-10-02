@@ -17,7 +17,15 @@ Generic "drop any NASA/scientific file in, get a report" tool for Space Apps hac
   Each returns `(json-able dict, [(title, png)])`.
 - `pipeline.py`: file, archive and folder handling, report/JSON/chunk writing, index.html.
 - `report.py`: HTML rendering. `plots.py`: matplotlib with the fixed CVD-safe palette.
-- `ai.py`: providers, cache, backoff and prompts. `qa.py`: retrieval (sentence-transformers or TF-IDF).
+- `ai.py`: providers, cache and backoff, plus the AI *workflows*. These are generators that
+  yield `Step` prompts and receive replies, driven by `run_workflow` (CLI) or by `web/bridge.py`
+  (browser BYOK). `verify.py` flattens the analysis into fact paths and labels claims.
+  `ai_view.py` renders the AI panel, quality list and product cards.
+- `analysis/quality.py`: rule-based checks, run for every file. `products.py`: the NASA product
+  catalog.
+- `qa.py`: retrieval (sentence-transformers or TF-IDF).
+- `evals/`: AI eval cases with known truths (`python -m evals.run --provider X`).
+  `tests/e2e/`: browser tests. The harness stubs Pyodide and proxies bridge calls to CPython.
 - `web/`: Netlify static site; Pyodide runs the package in-browser. `bridge.py` is the only
   JS↔Python surface (JSON strings in and out). `build.py` zips the package into `web/dist/`.
   The Pyodide version and package lists live at the top of `app.js`.
@@ -34,4 +42,8 @@ Generic "drop any NASA/scientific file in, get a report" tool for Space Apps hac
   The page then loads the missing modules on demand and retries (`MODULE_SOURCES` in `app.js`).
 - Always pass `encoding="utf-8"` to file reads and writes: reports contain → × and Arabic, and
   Windows defaults to cp1252.
+- The AI cache key includes the provider *model* name. Scripted FakeProvider runs in one test
+  share a cache dir, so give each run its own `model`.
+- AI prompts ask for JSON. Keep keys stable (`findings[].fact/value`, `page`/`quote`),
+  because `verify.py`, `ai_view.py` and `evals/score.py` depend on them.
 - Tests force `NASA_EXPLORER_EMBEDDINGS=tfidf` and clear AI keys; AI is tested with a fake provider.

@@ -112,8 +112,45 @@ The AI layer is configured with environment variables or a `.env` file (gitignor
   the tool prints the estimated token count, and responses are cached on disk in
   `~/.cache/nasa_explorer/ai`, so the same input is never sent twice.
 - For data files, only the computed summary and statistics are sent, never the raw file.
-- Papers are split into page-tagged chunks and summarised map-reduce style. Every claim
-  cites `(p. N)`.
+
+### Verified AI output
+- **Its own place in every report:** the AI analysis is a highlighted panel at the top. Without
+  AI it shows how to run it.
+- **Structured answers:** the model returns JSON. For data files that is overview, key findings,
+  issues, next analyses, visualizations, hackathon ideas and caveats. For papers it is problem,
+  method, data used, findings, limitations, NASA datasets and ideas.
+- **Every number is checked:**
+  - For data files, each finding must cite a *fact path* such as `statistics.t2m.mean`, and the
+    value is compared with what the tool computed.
+  - For papers, each claim must cite a page, and its numbers, quote or dataset name must appear
+    on that page.
+  - Each finding gets a badge: ✓ verified, ✗ wrong, ? not verified, or · no number.
+- **Review round:** if any claim fails, the model gets one round to fix it, with the exact
+  problems listed. Claims it cannot support stay flagged and are never hidden.
+- **Trusted context:** the model also receives the automatic quality checks and the recognised
+  NASA product notes, so its advice reflects real caveats.
+- **One implementation:** the workflows (`ai.data_workflow`, `ai.paper_workflow`) are generators.
+  The CLI and the website run the same code; only the HTTP call differs.
+
+### Quality checks and product cards (no AI needed)
+- **Rule-based checks:**
+  - Undeclared fill values (`-9999`, `9.96e36`), and NDVI-style values with no scale factor applied.
+  - Impossible ranges for K/°C/% and negative rainfall.
+  - Constant or mostly-missing variables, and outliers.
+  - Duplicate or missing time steps, and 0-360 longitudes.
+- **Product cards:** the tool recognises about 18 well-known products (MODIS LST/NDVI, FIRMS, NASA POWER, IMERG,
+  MERRA-2, GRACE, SMAP, ICESat-2, GEDI, Landsat C2, HLS, OCO-2, TEMPO, NISAR, Black Marble,
+  GISTEMP). Each card lists the resolution, the caveats people usually miss (for example the
+  Landsat C2 scale factors, or FIRMS confidence codes) and Earthdata/Worldview links.
+
+### Trends done right
+- **Seasonality:** a strong annual cycle is removed first, and monthly series use the
+  **Seasonal Mann-Kendall** test.
+- **Autocorrelation:** positively autocorrelated series switch to the **Hamed-Rao** corrected
+  test. Plain Mann-Kendall would call red noise "significant".
+- **Gridded data:** the report adds a per-pixel **trend map**, with dots where p<0.05, and the
+  **mean annual cycle**.
+
 - `--ask` retrieves passages with sentence-transformers when it is available, or with a built-in
   TF-IDF index (works offline, no install). With a provider it writes an answer citing
   `[file, p. N]`. Without one it lists the best passages.
@@ -141,6 +178,18 @@ Then open http://localhost:8000.
 - CSV/TSV/TXT, Excel, JSON, Parquet, NetCDF, HDF5, Zarr, GeoTIFF, Shapefile/GeoJSON/KML/GPKG, FITS,
   images, PDF (text through pypdf), DOCX, HTML, Markdown, and ZIP/TAR/GZ archives.
 - Extra libraries load the first time a format needs them.
+
+**AI on the website (bring your own key):**
+- Open *AI settings* and pick a provider:
+  - Gemini or Groq: both have free tiers.
+  - Anthropic.
+  - Ollama on your own machine: start it with `OLLAMA_ORIGINS=https://your-site.netlify.app`.
+- The key stays in your browser. It is kept for the session only, unless you tick "remember",
+  and it is sent only to that provider. There is no server.
+- Each report card has three tabs:
+  - **Report**
+  - **🤖 AI analysis**: verified findings with badges. The downloadable report includes them.
+  - **Ask this file**: a chat that cites fact paths or pages.
 
 **Desktop CLI only:**
 - GRIB, HDF4, OCR of scanned PDFs, and PDF table extraction. These need native libraries
@@ -204,9 +253,38 @@ unchanged. Raise `NotThisFormat` to let the next candidate reader try the file.
 
 ```bash
 pip install -e ".[all,dev]"
+python -m playwright install chromium   # for the website tests
 pytest -q                     # synthetic samples for every format; real NASA samples skip offline
 ruff check . && ruff format --check .
+E2E_PYODIDE=1 pytest tests/e2e/test_web_pyodide.py   # website on the real Pyodide runtime
 ```
+
+**CI** (`.github/workflows/ci.yml`) has two parts:
+- Lint and tests on Linux (Python 3.11 and 3.12) and on Windows. These runs include the real
+  NASA samples.
+- A job that runs the website on real Pyodide in Chromium.
+
+### AI eval set
+`evals/` holds files whose truth is known:
+- a warming grid
+- a seasonal station series
+- autocorrelated noise with no real trend
+- a grid with a planted `-9999` fill value
+- a short paper
+
+Use it to compare models and prompts:
+
+```bash
+python -m evals.run --provider gemini              # or groq / anthropic / ollama, --model ..., --lang ar
+```
+
+Each case is scored on:
+- the share of numbers verified
+- whether the expected facts are cited
+- whether the expected points are mentioned (season, autocorrelation, fill value…)
+- whether any wrong conclusion appears
+
+Results are saved in `evals/results/`.
 
 ### Known native-library quirk
 
