@@ -56,5 +56,6 @@ ignore = ["E501"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
+pythonpath = ["."]
 filterwarnings = ["ignore::DeprecationWarning", "ignore::UserWarning", "ignore::RuntimeWarning"]
 markers = ["network: needs internet access to NASA servers"]

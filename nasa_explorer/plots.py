@@ -29,8 +29,7 @@ SEQ = LinearSegmentedColormap.from_list(
 DIV = LinearSegmentedColormap.from_list(
     "div", ["#184f95", "#5598e7", "#f0efec", "#e66767", "#a32b2b"]
 )
-SEQ.set_bad("#f0efec")
-DIV.set_bad("#f0efec")
+SEQ, DIV = SEQ.with_extremes(bad="#f0efec"), DIV.with_extremes(bad="#f0efec")
 
 plt.rcParams.update(
     {
