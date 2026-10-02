@@ -3,7 +3,7 @@
 // web/bridge.py are sent: computed summaries and statistics, never the uploaded file.
 
 export const PROVIDERS = {
-  gemini: { label: "Google Gemini (free tier)", model: "gemini-2.5-flash", key: true, keyUrl: "https://aistudio.google.com/apikey" },
+  gemini: { label: "Google Gemini (free tier)", model: "gemini-3.8-flash", key: true, keyUrl: "https://aistudio.google.com/apikey" },
   groq: { label: "Groq (free tier)", model: "llama-3.3-70b-versatile", key: true, keyUrl: "https://console.groq.com/keys" },
   anthropic: { label: "Anthropic Claude", model: "claude-sonnet-5-5", key: true, keyUrl: "https://console.anthropic.com/settings/keys" },
   ollama: { label: "Ollama (local, no key)", model: "qwen2.5:7b", key: false, keyUrl: "https://ollama.com/download" },
@@ -48,7 +48,25 @@ export function isReady(s) {
   return Boolean(PROVIDERS[s.provider]) && (!PROVIDERS[s.provider].key || s.key.trim().length > 8);
 }
 
-export const modelOf = (s) => s.model.trim() || PROVIDERS[s.provider].model;
+export const modelOf = (s) => s.model.trim() || resolved[s.provider] || PROVIDERS[s.provider].model;
+
+// Providers retire model names often. When the configured one is gone, ask Gemini which
+// models this key can use and switch to the newest "flash" model.
+const resolved = {};
+
+async function newestGeminiFlash(key) {
+  const resp = await fetch("https://generativelanguage.googleapis.com/v1beta/models?pageSize=1000", {
+    headers: { "x-goog-api-key": key.trim() },
+  });
+  if (!resp.ok) return null;
+  const version = (n) => (n.match(/gemini-(\d+(?:\.\d+)?)/) || [0, "0"])[1];
+  const names = ((await resp.json()).models || [])
+    .filter((m) => (m.supportedGenerationMethods || []).includes("generateContent"))
+    .map((m) => m.name.replace(/^models\//, ""))
+    .filter((n) => /^gemini-[\d.]+-flash$/.test(n) || /^gemini-[\d.]+-flash-\d+$/.test(n));
+  names.sort((a, b) => parseFloat(version(b)) - parseFloat(version(a)) || a.length - b.length);
+  return names[0] || null;
+}
 
 async function sha256(text) {
   const buf = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(text));
@@ -133,6 +151,19 @@ async function callOnce(s, step) {
   throw new ProviderError(`${PROVIDERS[s.provider].label} error ${resp.status}: ${detail}`, resp.status, retryAfter);
 }
 
+async function callOnceWithModelFallback(s, step) {
+  try {
+    return await callOnce(s, step);
+  } catch (err) {
+    if (s.provider !== "gemini" || err.status !== 404 || resolved.gemini === null) throw err;
+    const before = modelOf(s);
+    const next = await newestGeminiFlash(s.key);
+    if (!next || next === before) throw err;
+    resolved.gemini = next;
+    return callOnce({ ...s, model: next }, step);
+  }
+}
+
 /** One model call with an on-device cache and backoff for free-tier rate limits (429). */
 export async function complete(s, step, onWait = () => {}) {
   const id = CACHE + (await sha256([s.provider, modelOf(s), step.json, step.system, step.prompt].join("|")));
@@ -141,7 +172,7 @@ export async function complete(s, step, onWait = () => {}) {
   let delay = 2;
   for (let attempt = 1; ; attempt++) {
     try {
-      const text = await callOnce(s, step);
+      const text = await callOnceWithModelFallback(s, step);
       try { storage("localStorage")?.setItem(id, text); } catch { /* quota full: skip caching */ }
       return text;
     } catch (err) {

@@ -142,3 +142,36 @@ def test_qa_without_ai(samples, tmp_path):
     assert hits[0]["file"] == "paper.pdf" and hits[0]["page"] == 2
     answer = qa.ask("brightness frp statistics", tmp_path, use_ai=False)
     assert "[fires.csv]" in answer
+
+
+def test_gemini_switches_to_newest_flash_when_model_is_retired(monkeypatch):
+    """Google retires model names (e.g. gemini-2.5-flash for new users); we must recover."""
+    from types import SimpleNamespace
+
+    from google.genai import errors
+
+    gem = ai.Gemini.__new__(ai.Gemini)
+    gem.model = "gemini-2.5-flash"
+    calls = []
+
+    def generate_content(model, contents, config):
+        calls.append(model)
+        if model == "gemini-2.5-flash":
+            raise errors.APIError(404, {"error": {"code": 404, "message": "model retired"}})
+        return SimpleNamespace(text="ok")
+
+    models = [
+        SimpleNamespace(name=f"models/{n}", supported_actions=["generateContent"])
+        for n in (
+            "gemini-2.5-flash",
+            "gemini-3.8-flash",
+            "gemini-3.8-flash-lite",
+            "gemini-3.1-pro",
+            "text-embedding-005",
+        )
+    ]
+    gem.client = SimpleNamespace(
+        models=SimpleNamespace(generate_content=generate_content, list=lambda: models)
+    )
+    assert gem.complete("hi", "sys") == "ok"
+    assert calls == ["gemini-2.5-flash", "gemini-3.8-flash"] and gem.model == "gemini-3.8-flash"

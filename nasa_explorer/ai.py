@@ -12,6 +12,7 @@ import json
 import logging
 import os
 import random
+import re
 import time
 from collections.abc import Callable, Generator
 from dataclasses import dataclass
@@ -127,9 +128,35 @@ class Gemini:
         from google import genai
 
         self.client = genai.Client(api_key=os.environ["GEMINI_API_KEY"])
-        self.model = model or "gemini-2.5-flash"
+        self.model = model or "gemini-3.8-flash"
+
+    def newest_flash(self) -> str | None:
+        """Model names get retired; pick the newest generally available 'flash' model."""
+        names = [
+            m.name.removeprefix("models/")
+            for m in self.client.models.list()
+            if "generateContent" in (getattr(m, "supported_actions", None) or ["generateContent"])
+        ]
+        flash = [n for n in names if re.fullmatch(r"gemini-[\d.]+-flash(-\d+)?", n)]
+        flash.sort(key=lambda n: (-float(re.match(r"gemini-([\d.]+)-", n).group(1)), len(n)))
+        return flash[0] if flash else None
 
     def complete(self, prompt: str, system: str, json_mode: bool = False) -> str:
+        from google.genai import errors
+
+        try:
+            return self._generate(prompt, system, json_mode)
+        except errors.APIError as exc:
+            if getattr(exc, "code", None) != 404:
+                raise
+            replacement = self.newest_flash()
+            if not replacement or replacement == self.model:
+                raise
+            log.warning("Gemini model %s is unavailable; switching to %s", self.model, replacement)
+            self.model = replacement
+            return self._generate(prompt, system, json_mode)
+
+    def _generate(self, prompt: str, system: str, json_mode: bool) -> str:
         from google.genai import errors, types
 
         try:

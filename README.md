@@ -102,7 +102,7 @@ The AI layer is configured with environment variables or a `.env` file (gitignor
 | `AI_PROVIDER` | Needs | Default model |
 |---|---|---|
 | `ollama` | Ollama running locally (free, offline) | `qwen2.5:7b`, or any model you have pulled |
-| `gemini` | `GEMINI_API_KEY` (free tier) | `gemini-2.5-flash` |
+| `gemini` | `GEMINI_API_KEY` (free tier) | `gemini-3.8-flash` |
 | `groq` | `GROQ_API_KEY` (free tier) | `llama-3.3-70b-versatile` |
 | `anthropic` | `ANTHROPIC_API_KEY` | `claude-sonnet-5-5` |
 

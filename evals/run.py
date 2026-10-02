@@ -1,6 +1,6 @@
 """Run the AI eval set against a real provider.
 
-    python -m evals.run --provider gemini [--model gemini-2.5-flash] [--lang en]
+    python -m evals.run --provider gemini [--model gemini-3.8-flash] [--lang en]
 
 Prints a table and writes evals/results/<provider>_<model>_<timestamp>.json.
 Needs the provider's key in the environment / .env (see .env.example).

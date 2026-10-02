@@ -61,7 +61,7 @@ def _run(tmp_path, monkeypatch, files):
 
 def test_ai_job_round_trip_updates_report(samples, tmp_path, monkeypatch):
     res = _run(tmp_path, monkeypatch, [samples["netcdf4"][0]])["grid.nc"]
-    first = json.loads(bridge.ai_start(res["key"], "en", "gemini", "gemini-2.5-flash"))
+    first = json.loads(bridge.ai_start(res["key"], "en", "gemini", "gemini-3.8-flash"))
     step = first["step"]
     assert step["json"] and step["tokens"] > 100 and "statistics.t2m.mean" in step["prompt"]
     reply = {
