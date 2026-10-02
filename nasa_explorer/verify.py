@@ -71,6 +71,7 @@ def facts(analysis: dict) -> dict[str, Any]:
                 "units",
                 "seasonal_strength",
                 "lag1_autocorr",
+                "short_record_years",
             )
             if k in t
         }

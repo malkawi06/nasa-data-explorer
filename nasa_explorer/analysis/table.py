@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 import re
 
 import numpy as np
@@ -15,7 +16,15 @@ from .stats import numeric_stats, seasonal_cycle, time_coverage, trend
 SENTINELS = (-9999, -9999.0, -999, -999.0, -999.9, -99999, -99.99, -8888, 9.96921e36, 1e20)
 LAT_RE = re.compile(r"^(lat|latitude|lat_dd|lat_deg|decimallatitude|y_lat)$", re.I)
 LON_RE = re.compile(r"^(lon|long|longitude|lng|lon_dd|lon_deg|decimallongitude|x_lon)$", re.I)
-DATE_RE = re.compile(r"(date|time|datetime|timestamp|day|key|period)", re.I)
+DATE_RE = re.compile(
+    r"(date|time|datetime|timestamp|day|key|period|datum|fecha|epoch|تاريخ|التاريخ|وقت|زمن)", re.I
+)
+# values that are unmistakably dates, so the column name does not matter
+DATE_VALUE_RE = re.compile(
+    r"\d{4}[-/.]\d{1,2}[-/.]\d{1,2}([ T]\d{1,2}:\d{2}(:\d{2}(\.\d+)?)?(Z|[+-]\d{2}:?\d{2})?)?"
+    r"|\d{1,2}[-/.]\d{1,2}[-/.]\d{4}"
+)
+DAY_FIRST_RE = re.compile(r"(\d{1,2})[-/.](\d{1,2})[-/.]\d{4}")
 MAX_TREND_COLS = 8
 MAX_TS_COLS = 4
 
@@ -38,9 +47,29 @@ def _parse_dates(s: pd.Series) -> pd.Series | None:
         if sample.empty or not sample.str.contains(r"\d").all():
             return None
         fmt = "%Y%m%d" if sample.str.fullmatch(r"\d{8}").all() else None
-        parsed = pd.to_datetime(s.astype(str), errors="coerce", format=fmt)
+        parts = sample.str.extract(DAY_FIRST_RE).dropna().astype(int)
+        dayfirst = bool(len(parts)) and (parts[0] > 12).any() and not (parts[1] > 12).any()
+        parsed = pd.to_datetime(
+            s.astype(str), errors="coerce", format=fmt, dayfirst=dayfirst, utc=_has_tz(sample)
+        )
+        if parsed.dt.tz is not None:
+            parsed = parsed.dt.tz_localize(None)
         return parsed if parsed.notna().mean() > 0.9 else None
+    if pd.api.types.is_integer_dtype(s) or pd.api.types.is_float_dtype(s):
+        v = s.dropna()
+        for unit, lo, hi in (("ms", 1e11, 4.2e12), ("s", 1e8, 4.2e9)):  # epoch, 1973-2100
+            if len(v) and v.between(lo, hi).all():
+                return pd.to_datetime(s, unit=unit, errors="coerce")
     return None
+
+
+def _has_tz(sample: pd.Series) -> bool:
+    return bool(sample.str.contains(r"(Z|[+-]\d{2}:?\d{2})$").any())
+
+
+def _date_like_values(s: pd.Series) -> bool:
+    sample = s.dropna().astype(str).str.strip().head(200)
+    return len(sample) > 0 and sample.str.fullmatch(DATE_VALUE_RE).mean() > 0.9
 
 
 def find_time(df: pd.DataFrame) -> tuple[pd.Series | None, str | None]:
@@ -63,8 +92,14 @@ def find_time(df: pd.DataFrame) -> tuple[pd.Series | None, str | None]:
     ordered = sorted(df.columns, key=lambda c: 0 if DATE_RE.search(str(c)) else 1)
     for c in ordered:
         if (t := _parse_dates(df[c])) is not None:
-            if not DATE_RE.search(str(c)) and not pd.api.types.is_datetime64_any_dtype(df[c]):
-                continue  # only trust value-parsing for date-like names
+            named = DATE_RE.search(str(c))
+            numeric = pd.api.types.is_numeric_dtype(df[c])
+            if numeric and not named:
+                continue  # epoch numbers only for time-like names
+            if not (
+                named or _date_like_values(df[c]) or pd.api.types.is_datetime64_any_dtype(df[c])
+            ):
+                continue  # value-parsing alone is trusted only for unmistakable date strings
             return t, str(c)
     if "year" in cols and pd.api.types.is_numeric_dtype(df[cols["year"]]):
         y = df[cols["year"]]
@@ -94,12 +129,39 @@ def find_latlon(df: pd.DataFrame) -> tuple[str | None, str | None]:
     return None, None
 
 
+def _reader_notes(m: dict) -> list[str]:
+    out = []
+    if len(m.get("sheets", {})) > 1:
+        others = ", ".join(f"'{k}'" for k in m["sheets"] if k != m.get("sheet_used"))
+        out.append(
+            f"workbook has {len(m['sheets'])} sheets; analysed '{m['sheet_used']}' (the largest), not {others}"
+        )
+    if m.get("units"):
+        out.append(
+            "units row under the header: " + ", ".join(f"{k} [{v}]" for k, v in m["units"].items())
+        )
+    if m.get("decimal") == "comma":
+        out.append("decimal commas read as decimal points")
+    if m.get("numbers_from_text"):
+        out.append("numbers written as text converted: " + ", ".join(m["numbers_from_text"]))
+    if m.get("dropped_empty_columns"):
+        out.append(f"{m['dropped_empty_columns']} empty unnamed column(s) dropped")
+    return out
+
+
 def analyze_table(res: ReadResult, opts: ReadOptions) -> tuple[dict, list[tuple[str, bytes]]]:
     df = res.data
     is_geo = hasattr(df, "geometry") and getattr(df, "_geometry_column_name", None) in df.columns
     gdf = df if is_geo else None
     df = pd.DataFrame(df.drop(columns=df.geometry.name)) if is_geo else df.copy()
-    notes: list[str] = []
+    for c in df.select_dtypes(
+        include="object"
+    ).columns:  # lists/dicts cannot be counted or compared
+        if df[c].map(lambda v: isinstance(v, list | dict)).any():
+            df[c] = df[c].map(
+                lambda v: json.dumps(v, default=str) if isinstance(v, list | dict) else v
+            )
+    notes = _reader_notes(res.metadata)
     replaced = _clean_sentinels(df)
     if replaced:
         notes.append(
@@ -184,9 +246,18 @@ def analyze_table(res: ReadResult, opts: ReadOptions) -> tuple[dict, list[tuple[
     figs: list[tuple[str, bytes]] = []
     trends: list[dict] = []
     event_info: dict | None = None
-    if ev.is_event_table(times, bool(lat)):
+    if series_col := ev.series_column(times, df, lat):
+        coverage.setdefault("time", {})["series_column"] = series_col
+        notes.append(
+            f"{df[series_col].nunique()} separate series in '{series_col}'; time series and "
+            "trends use the mean across them"
+        )
+    elif ev.is_event_table(times, bool(lat)):
         # rows are events (e.g. fire detections): analyse how many happen when and where
         event_info, counts = ev.summarize(times, df, lat, lon)
+        tc = coverage.get("time", {})
+        if tc.pop("gaps", None):  # days without events are not missing data
+            tc.pop("largest_gap", None)
         if t := trend(counts, "events per day", "events/day"):
             trends.append(t)
         if opts.plots:
@@ -214,7 +285,7 @@ def analyze_table(res: ReadResult, opts: ReadOptions) -> tuple[dict, list[tuple[
         per_date = ts.groupby(
             ts.index.normalize() if ts.index.normalize().nunique() > 1 else ts.index
         ).mean()
-        for c in numeric[:MAX_TREND_COLS]:
+        for c in [c for c in numeric if df[c].nunique() > 2][:MAX_TREND_COLS]:  # not 0/1 flags
             if t := trend(per_date[c], str(c)):
                 trends.append(t)
         if opts.plots and len(per_date) > 1 and event_info is None:

@@ -167,18 +167,23 @@ def trend(series: pd.Series, name: str, units: str = "") -> dict | None:
         )
     except ImportError:
         out.update(mk_trend="n/a", mk_p=float("nan"), method="linear regression only")
+    span = float(x[-1] - x[0])
+    if span < MIN_SPAN_YEARS - 0.05 and float(pd.Series(s.index).diff().dt.days.median()) < 60:
+        out["short_record_years"] = round(span, 2)  # one or two seasons: slope ~ the season
     out["extremes"] = _extremes(s.index, residuals)
     out["text"] = describe_trend(out)
     return out
 
 
+MIN_SPAN_YEARS = 2.0  # below this, sub-monthly data cannot separate a trend from the seasons
 EXTREME_Z = 5.0  # robust z; lower values flag ordinary heavy-tailed noise
 
 
 def _extremes(idx: pd.DatetimeIndex, residuals: np.ndarray, top: int = 5) -> list[dict]:
     """Periods far from normal after removing the annual cycle and the trend (robust z-score)."""
     med = float(np.median(residuals))
-    scale = 1.4826 * float(np.median(np.abs(residuals - med)))
+    # MAD alone collapses for zero-inflated series (daily rain), turning every shower into 200σ
+    scale = max(1.4826 * float(np.median(np.abs(residuals - med))), 0.5 * float(np.std(residuals)))
     if not np.isfinite(scale) or scale == 0:
         return []
     z = (residuals - med) / scale
@@ -214,12 +219,21 @@ def describe_trend(t: dict) -> str:
     direction = "increasing" if t["slope_per_year"] > 0 else "decreasing"
     if not np.isfinite(p):
         return f"slope {slope} (Mann-Kendall unavailable)"
+    if "short_record_years" in t:
+        return (
+            f"record too short for a trend ({span_text(t['short_record_years'])}): the {direction} slope {slope} "
+            f"mostly reflects the season ({ptxt})"
+        )
     if p < 0.05:
         level = "99%" if p < 0.01 else "95%"
         return f"{direction}, significant at {level} ({ptxt}); slope {slope}{_how(t)}"
     if p < 0.1:
         return f"weakly {direction} (significant at 90% only, {ptxt}); slope {slope}{_how(t)}"
     return f"no significant trend ({ptxt}); slope {slope}{_how(t)}"
+
+
+def span_text(years: float) -> str:
+    return f"{round(years * 12)} months" if years < 2 else f"{years:.1f} years"
 
 
 def _how(t: dict) -> str:

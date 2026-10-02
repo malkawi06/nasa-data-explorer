@@ -102,7 +102,7 @@ def analyze_document(res: ReadResult, opts: ReadOptions):
         "tables": m.get("tables", [])[:10],
         "nasa_mentions": m.get("nasa_mentions", {}),
         "keywords": keywords,
-        "ocr": m.get("ocr", False),
+        "ocr": m.get("ocr"),  # None for formats that cannot be scans (text, html, docx)
     }
     notes = list(m.get("notes", []))
     if m.get("page_note"):

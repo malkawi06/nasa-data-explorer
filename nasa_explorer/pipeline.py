@@ -13,6 +13,7 @@ from pathlib import Path
 
 from . import archives, products, report
 from .analysis import analyze
+from .analysis.quality import unreadable
 from .core import ReadOptions, ReadResult
 from .readers.zarr_store import is_zarr_dir
 from .registry import read_file, readers
@@ -125,10 +126,15 @@ def _headline(kind: str, a: dict) -> str:
     elif kind == "tree":
         parts.append(f"{s.get('n_datasets', 0)} HDF5 datasets")
     else:
-        parts.append(f"signature: {s.get('signature', '?')}")
+        errors = [q["message"] for q in a.get("quality", []) if q["level"] == "error"]
+        parts.append(errors[0][:120] if errors else f"signature: {s.get('signature', '?')}")
     if t := cov.get("time"):
         parts.append(f"{str(t.get('start', ''))[:10]} → {str(t.get('end', ''))[:10]}")
-    if a.get("trends"):
+    if e := a.get("events"):
+        parts.append(
+            f"{e['total']:,} events, peak {e['peak_month']} ({e['peak_month_share_pct']:g}%)"
+        )
+    elif a.get("trends"):
         t0 = a["trends"][0]
         parts.append(f"{t0['variable']}: {t0['text'].split(';')[0]}")
     return " · ".join(parts)
@@ -190,6 +196,10 @@ def process_file(
         res, reader_name, problems = read_file(path, opts)
         analysis, figs = analyze(res, opts)
         analysis["products"] = products.identify(label, analysis)
+        if res.kind == "binary":
+            analysis["quality"] = unreadable(
+                path.stat().st_size, str(res.metadata.get("signature", "")), problems
+            ) + analysis.get("quality", [])
     except Exception as exc:  # report the failure instead of crashing a folder run
         log.exception("failed on %s", path)
         analysis, figs, error = {"summary": {}, "notes": []}, [], f"{type(exc).__name__}: {exc}"

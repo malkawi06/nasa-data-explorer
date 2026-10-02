@@ -8,6 +8,8 @@ from __future__ import annotations
 
 import re
 
+from .stats import span_text
+
 FILL_LIKE = (-9999.0, -999.0, -999.9, -99999.0, -32767.0, -32768.0, 65535.0, 32767.0)
 TEMP_NAME = re.compile(r"(^t2m$|temp|^t$|^ta$|^tas|lst|skt|sst|surface_temperature|^t2m)", re.I)
 PRECIP_NAME = re.compile(r"(precip|rain|prcp|prectot|^pr$|^tp$|snowfall)", re.I)
@@ -31,7 +33,7 @@ def _units_by_var(analysis: dict) -> dict[str, str]:
     }
 
 
-def _value_checks(name: str, st: dict, units: str) -> list[dict]:
+def _value_checks(name: str, st: dict, units: str, kind: str = "") -> list[dict]:
     out: list[dict] = []
     if "min" not in st:
         if st.get("count", 0) == 0:
@@ -41,7 +43,9 @@ def _value_checks(name: str, st: dict, units: str) -> list[dict]:
         return out
     lo, hi = st["min"], st["max"]
     u = units.strip().lower()
-    if abs(lo) >= 9.9e19 or abs(hi) >= 9.9e19 or lo in FILL_LIKE or hi in FILL_LIKE:
+    if kind != "image" and (  # saturated pixels (255, 65535) are real in photos
+        abs(lo) >= 9.9e19 or abs(hi) >= 9.9e19 or lo in FILL_LIKE or hi in FILL_LIKE
+    ):
         bad = lo if (abs(lo) >= 9.9e19 or lo in FILL_LIKE) else hi
         out.append(
             _issue(
@@ -143,7 +147,8 @@ def _coverage_checks(kind: str, analysis: dict) -> list[dict]:
     out: list[dict] = []
     cov = analysis.get("coverage", {})
     t = cov.get("time") or {}
-    point_data = kind == "table" and "space" in cov  # many rows per time step are normal
+    # many rows per time step are normal for point data and for several stations side by side
+    point_data = kind == "table" and ("space" in cov or "series_column" in t)
     if t.get("duplicates") and not point_data:
         out.append(
             _issue(
@@ -189,6 +194,18 @@ def _coverage_checks(kind: str, analysis: dict) -> list[dict]:
                     "longitudes use 0-360; convert to -180..180 before mapping with other data",
                 )
             )
+    short = [t for t in analysis.get("trends", []) if "short_record_years" in t]
+    if short:
+        names = ", ".join(t["variable"] for t in short)
+        out.append(
+            _issue(
+                "warning",
+                "short_record",
+                None,
+                f"only {span_text(short[0]['short_record_years'])} of data ({names}) - too short to "
+                "tell a long-term trend from the seasonal cycle",
+            )
+        )
     for tr in analysis.get("trends", []):
         if tr.get("seasonal"):
             out.append(
@@ -233,7 +250,7 @@ def _pct(share: float) -> str:
 def _document_checks(analysis: dict) -> list[dict]:
     s = analysis.get("summary", {})
     out = []
-    if s.get("words", 0) < 50:
+    if s.get("words", 0) < 50 and s.get("ocr") is not None:  # only page formats can be scans
         out.append(
             _issue(
                 "warning",
@@ -256,6 +273,24 @@ def _document_checks(analysis: dict) -> list[dict]:
     return out
 
 
+def unreadable(size: int, signature: str, problems: list[str]) -> list[dict]:
+    """Why a file ended up as 'unknown': empty, or a known format that failed to open."""
+    if size == 0:
+        return [_issue("error", "empty_file", None, "the file is empty (0 bytes)")]
+    if problems and signature not in ("", "unrecognised"):
+        first = problems[0].split("\n")[0][:220]
+        return [
+            _issue(
+                "error",
+                "unreadable",
+                None,
+                f"has a {signature} signature but could not be opened - truncated or corrupted "
+                f"download? ({first})",
+            )
+        ]
+    return []
+
+
 def check(kind: str, analysis: dict) -> list[dict]:
     if kind == "document":
         issues = _document_checks(analysis)
@@ -264,9 +299,13 @@ def check(kind: str, analysis: dict) -> list[dict]:
         issues = [
             i
             for name, st in analysis.get("statistics", {}).items()
-            for i in _value_checks(name, st, units.get(name, ""))
+            for i in _value_checks(name, st, units.get(name, ""), kind)
         ]
         issues += _coverage_checks(kind, analysis)
+        if kind == "table" and analysis.get("summary", {}).get("n_rows") == 0:
+            issues.append(
+                _issue("error", "no_rows", None, "the table has a header but no data rows")
+            )
     else:
         issues = []
     order = {"error": 0, "warning": 1, "info": 2}

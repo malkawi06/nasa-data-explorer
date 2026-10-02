@@ -13,6 +13,7 @@ HOTSPOT_DEG = 0.5
 MAX_CATEGORIES = 20
 MIN_CLUSTER_SHARE = 0.002  # a cell must hold >=0.2% of events to seed or join a cluster
 MIN_CORRELATION = 0.3
+MAX_SERIES = 200  # more distinct values than this is an ID, not a station list
 
 
 def is_event_table(times: pd.Series | None, has_coords: bool) -> bool:
@@ -23,6 +24,28 @@ def is_event_table(times: pd.Series | None, has_coords: bool) -> bool:
         return False
     per_date = len(days) / max(1, days.nunique())
     return per_date >= EVENTS_PER_DATE or (has_coords and per_date > 1.0)
+
+
+def series_column(times: pd.Series | None, df: pd.DataFrame, lat: str | None = None) -> str | None:
+    """A text column that splits repeated dates into separate series (station, site, city):
+    such a table is several time series side by side, not a list of events. A station keeps
+    its position; events that merely share a region name (earthquakes) do not."""
+    if times is None:
+        return None
+    days = pd.DatetimeIndex(times).normalize()
+    if days.nunique() == len(days):
+        return None
+    for col in df.columns:
+        values = df[col]
+        n = values.nunique()
+        if pd.api.types.is_numeric_dtype(values) or not 1 < n <= min(MAX_SERIES, len(df) / 3):
+            continue  # a series needs several rows; one value per row is an ID
+        if lat is not None and df.groupby(values.astype(str))[lat].nunique().median() > 1:
+            continue
+        pairs = pd.Series(list(zip(days, values.astype(str), strict=True)))
+        if pairs.duplicated().mean() < 0.05:
+            return str(col)
+    return None
 
 
 def daily_counts(times: pd.Series) -> pd.Series:
