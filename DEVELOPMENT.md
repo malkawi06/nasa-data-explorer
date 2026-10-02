@@ -31,7 +31,7 @@ Generic "drop any NASA/scientific file in, get a report" tool for Space Apps hac
 - Report f-strings must stay Python 3.10 compatible (no nested same-type quotes).
 - The browser build has no pyogrio, pymupdf, eccodes or pyhdf. Readers must keep heavy imports
   inside the function and declare them in `requires`, so the registry disables them cleanly.
-  The page then loads the missing modules on demand and retries (`PROVIDERS` in `app.js`).
+  The page then loads the missing modules on demand and retries (`MODULE_SOURCES` in `app.js`).
 - Always pass `encoding="utf-8"` to file reads and writes: reports contain → × and Arabic, and
   Windows defaults to cp1252.
 - Tests force `NASA_EXPLORER_EMBEDDINGS=tfidf` and clear AI keys; AI is tested with a fake provider.

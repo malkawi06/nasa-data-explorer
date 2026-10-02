@@ -535,3 +535,18 @@ def interpret(rep: FileReport, res: ReadResult, lang: str) -> dict | None:
     except Exception as exc:
         rep.analysis.setdefault("notes", []).append(f"AI layer skipped: {exc}")
         return None
+
+
+def chat_context(
+    analysis: dict, file: str, reader: str, pages: list[str] | None, question: str, k: int = 5
+) -> str:
+    """Material for a question about one file: computed facts, or the most relevant pages."""
+    if not pages:
+        return _data_context(analysis, file, reader)[0]
+    from .qa import TfidfEmbedder
+
+    emb = TfidfEmbedder()
+    matrix = emb.fit(pages)
+    best = sorted((-float(score), i) for i, score in enumerate(matrix @ emb.query(question)))[:k]
+    blocks = [f"[page {i + 1}]\n{pages[i][:3000]}" for _, i in sorted(best, key=lambda x: x[1])]
+    return f"DOCUMENT: {file}\n\n" + "\n\n".join(blocks)

@@ -46,6 +46,20 @@
       <p class="hint" id="opt-error" role="alert"></p>
     </details>
 
+    <details class="options" id="ai-settings">
+      <summary data-i18n="aiSettings">AI settings (optional, bring your own key)</summary>
+      <form id="ai-form" class="grid" autocomplete="off">
+        <label><span data-i18n="provider">Provider</span><select id="ai-provider"></select></label>
+        <label><span data-i18n="model">Model (optional)</span><input id="ai-model" type="text" spellcheck="false"></label>
+        <label id="ai-key-row"><span data-i18n="apiKey">API key</span><input id="ai-key" type="password" spellcheck="false" autocomplete="off">
+          <a id="ai-get-key" class="hint" target="_blank" rel="noopener" data-i18n="getKey">Get a key</a></label>
+        <label id="ai-host-row" hidden><span data-i18n="ollamaHost">Ollama address</span><input id="ai-host" type="url"></label>
+        <label class="check"><input id="ai-remember" type="checkbox"> <span data-i18n="remember">Remember the key on this device</span></label>
+        <div class="save-row"><button class="btn open" type="submit" data-i18n="save">Save</button> <span id="ai-saved" class="hint" role="status"></span></div>
+      </form>
+      <p class="hint" data-i18n="keyNote">Your key stays in this browser and is sent only to the provider you choose.</p>
+    </details>
+
     <section id="results" aria-label="Reports"></section>
 
     <section class="formats">
@@ -75,7 +89,26 @@
         </div>
       </div>
       <p class="err" hidden></p>
-      <iframe class="preview" title="Report preview" sandbox="allow-same-origin" loading="lazy"></iframe>
+      <div class="tablist" role="tablist">
+        <button type="button" role="tab" data-tab="report" aria-selected="true" data-i18n="tabReport">Report</button>
+        <button type="button" role="tab" data-tab="ai" aria-selected="false" tabindex="-1" data-i18n="tabAI">🤖 AI analysis</button>
+        <button type="button" role="tab" data-tab="ask" aria-selected="false" tabindex="-1" data-i18n="tabAsk">Ask this file</button>
+      </div>
+      <div role="tabpanel" data-panel="report">
+        <iframe class="preview" title="Report preview" sandbox="allow-same-origin" loading="lazy"></iframe>
+      </div>
+      <div role="tabpanel" data-panel="ai" hidden>
+        <p class="hint" data-i18n="aiIntro">The AI reads only the computed summary and statistics (never your file).</p>
+        <div class="ai-row"><button type="button" class="btn open run-ai" data-i18n="runAI">Run AI analysis</button>
+          <span class="ai-status hint" role="status"></span></div>
+        <iframe class="ai-frame" title="AI analysis" sandbox="allow-same-origin allow-popups" hidden></iframe>
+      </div>
+      <div role="tabpanel" data-panel="ask" hidden>
+        <form class="ask-form ai-row"><input class="ask-input" type="text" autocomplete="off">
+          <button class="btn open" type="submit" data-i18n="askSend">Ask</button></form>
+        <p class="ask-status hint" role="status"></p>
+        <div class="chat-log"></div>
+      </div>
     </article>
   </template>
 

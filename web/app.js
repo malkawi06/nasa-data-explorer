@@ -1,5 +1,7 @@
 // NASA Data Explorer - browser build. Python (Pyodide) runs nasa_explorer locally;
 // nothing is uploaded anywhere.
+import { PROVIDERS, complete, isReady, loadSettings, modelOf, saveSettings } from "./ai.js";
+
 const PYODIDE_VERSION = "314.0.7";
 const PYODIDE_URL = `https://cdn.jsdelivr.net/pyodide/v${PYODIDE_VERSION}/full/`;
 const MAX_MB = 600; // wasm32 memory is limited; larger files are better run with the CLI
@@ -10,7 +12,7 @@ const CORE = {
   pip: ["pymannkendall", "h5netcdf", "openpyxl", "markdown"],
 };
 // Optional readers: module name used in the reader's `requires` -> what provides it.
-const PROVIDERS = {
+const MODULE_SOURCES = {
   rasterio: { pkgs: ["rasterio", "pyproj"], pip: ["rioxarray"] },
   rioxarray: { pkgs: ["rasterio", "pyproj"], pip: ["rioxarray"] },
   geopandas: { pkgs: ["geopandas", "fiona", "shapely", "pyproj"], pip: [] },
@@ -43,6 +45,16 @@ const T = {
     badBbox: "Bounding box must be four numbers: W,S,E,N",
     reader: "Reader", kind: "Kind", browser: "In browser", category: "Category", extensions: "Extensions",
     yes: "browser", no: "desktop",
+    tabReport: "Report", tabAI: "🤖 AI analysis", tabAsk: "Ask this file",
+    runAI: "Run AI analysis", rerunAI: "Run again",
+    aiIntro: "The AI reads only the computed summary and statistics (never your file). Every number it writes is checked against those statistics, or against the cited page for papers.",
+    needKey: "Choose a provider and paste an API key in “AI settings” first (Gemini and Groq have free tiers).",
+    aiStep: (x) => `${x.label}: sending ~${x.tokens.toLocaleString()} tokens to ${x.provider}…`,
+    aiWait: (sec) => `Rate limited by the provider; retrying in ${sec}s…`,
+    aiDone: (v) => `Done: ${v.verified || 0} verified, ${v.mismatch || 0} wrong, ${v.unsupported || 0} not verified.`,
+    aiFailed: "AI failed: ",
+    askPlaceholder: "e.g. Which months are warmest? Is there a trend?", askSend: "Ask",
+    saved: "Saved.", keyNote: "Your key stays in this browser and is sent only to the provider you choose.",
     desktop: "This format (GRIB / HDF4) needs native libraries the browser lacks. Run: pip install \"nasa-data-explorer[grib,hdf4]\" then nasa-explore FILE",
   },
   ar: {
@@ -67,6 +79,18 @@ const T = {
     open: "فتح", html: "HTML", json: "JSON",
     reader: "القارئ", kind: "النوع", browser: "في المتصفح", category: "الفئة", extensions: "الامتدادات",
     yes: "المتصفح", no: "سطح المكتب",
+    tabReport: "التقرير", tabAI: "🤖 تحليل الذكاء الاصطناعي", tabAsk: "اسأل الملف",
+    runAI: "شغّل تحليل الذكاء الاصطناعي", rerunAI: "أعد التشغيل",
+    aiIntro: "يقرأ الذكاء الاصطناعي الملخص والإحصاءات المحسوبة فقط (وليس ملفك). كل رقم يكتبه يُفحص مقابل هذه الإحصاءات، أو مقابل الصفحة المذكورة في الأوراق العلمية.",
+    needKey: "اختر مزوّداً والصق مفتاح API في «إعدادات الذكاء الاصطناعي» أولاً (Gemini وGroq لديهما خطط مجانية).",
+    aiStep: (x) => `${x.label}: إرسال نحو ${x.tokens.toLocaleString()} رمز إلى ${x.provider}…`,
+    aiWait: (sec) => `تجاوزنا حدّ المزوّد؛ إعادة المحاولة بعد ${sec} ث…`,
+    aiDone: (v) => `تم: ${v.verified || 0} مؤكَّد، ${v.mismatch || 0} خاطئ، ${v.unsupported || 0} غير مؤكَّد.`,
+    aiFailed: "فشل الذكاء الاصطناعي: ",
+    askPlaceholder: "مثلاً: ما أدفأ الأشهر؟ هل يوجد اتجاه؟", askSend: "اسأل",
+    saved: "تم الحفظ.", keyNote: "يبقى مفتاحك في هذا المتصفح ويُرسَل فقط إلى المزوّد الذي تختاره.",
+    aiSettings: "إعدادات الذكاء الاصطناعي", provider: "المزوّد", model: "النموذج (اختياري)", apiKey: "مفتاح API",
+    remember: "تذكّر المفتاح على هذا الجهاز", ollamaHost: "عنوان Ollama", save: "حفظ", getKey: "احصل على مفتاح",
     desktop: "هذه الصيغة (GRIB / HDF4) تحتاج مكتبات غير متوفرة في المتصفح. شغّل: pip install \"nasa-data-explorer[grib,hdf4]\" ثم nasa-explore FILE",
   },
 };
@@ -107,11 +131,11 @@ async function install({ pkgs = [], pip = [] }) {
 }
 
 async function provide(modules) {
-  const todo = modules.filter((m) => PROVIDERS[m] && !state.loaded.has(`mod:${m}`));
+  const todo = modules.filter((m) => MODULE_SOURCES[m] && !state.loaded.has(`mod:${m}`));
   if (!todo.length) return false;
   setStatus("extra", "busy", todo.join(", "));
   for (const m of todo) {
-    await install(PROVIDERS[m]);
+    await install(MODULE_SOURCES[m]);
     state.loaded.add(`mod:${m}`);
   }
   await state.py.runPythonAsync("import importlib; importlib.invalidate_caches()");
@@ -182,6 +206,12 @@ function download(name, text, type) {
   setTimeout(() => URL.revokeObjectURL(url), 1000);
 }
 
+function fitFrame(frame) {
+  frame.addEventListener("load", () => {
+    try { frame.style.height = `${frame.contentDocument.documentElement.scrollHeight + 8}px`; } catch { /* cross-origin */ }
+  });
+}
+
 function renderCard(r) {
   const card = $("#card-tpl").content.firstElementChild.cloneNode(true);
   for (const el of card.querySelectorAll("[data-i18n]")) el.textContent = t(el.dataset.i18n) ?? el.textContent;
@@ -203,7 +233,129 @@ function renderCard(r) {
   };
   card.querySelector(".dl-html").onclick = () => download(`${base}.html`, r.html, "text/html");
   card.querySelector(".dl-json").onclick = () => download(`${base}.json`, r.json, "application/json");
+
+  // tabs: Report | AI analysis | Ask
+  const tabs = [...card.querySelectorAll("[role=tab]")];
+  const select = (name) => {
+    for (const tab of tabs) {
+      const on = tab.dataset.tab === name;
+      tab.setAttribute("aria-selected", String(on));
+      tab.tabIndex = on ? 0 : -1;
+      card.querySelector(`[data-panel="${tab.dataset.tab}"]`).hidden = !on;
+    }
+  };
+  for (const tab of tabs) tab.addEventListener("click", () => select(tab.dataset.tab));
+  card.querySelector(".tablist").addEventListener("keydown", (e) => {
+    const i = tabs.findIndex((x) => x.getAttribute("aria-selected") === "true");
+    const step = { ArrowRight: 1, ArrowLeft: -1 }[e.key] * (document.documentElement.dir === "rtl" ? -1 : 1);
+    if (!step) return;
+    const next = tabs[(i + step + tabs.length) % tabs.length];
+    select(next.dataset.tab);
+    next.focus();
+  });
+  if (r.error || r.kind === "binary") card.querySelector(".tablist").hidden = true;
+  card.querySelector(".ask-input").placeholder = t("askPlaceholder");
+  const aiFrame = card.querySelector(".ai-frame");
+  fitFrame(aiFrame);
+  card.querySelector(".run-ai").onclick = (e) => runAI(card, r, e.currentTarget);
+  card.querySelector(".ask-form").onsubmit = (e) => {
+    e.preventDefault();
+    askFile(card, r);
+  };
   return card;
+}
+
+function aiSettingsOrPrompt(statusEl) {
+  const s = loadSettings();
+  if (isReady(s)) return s;
+  statusEl.textContent = t("needKey");
+  const panel = $("#ai-settings");
+  panel.open = true;
+  panel.scrollIntoView({ behavior: "smooth", block: "center" });
+  $("#ai-key").focus();
+  return null;
+}
+
+async function drive(start, s, statusEl) {
+  let res = JSON.parse(start());
+  while (!res.done) {
+    statusEl.textContent = t("aiStep", { ...res.step, provider: PROVIDERS[s.provider].label });
+    const reply = await complete(s, res.step, (sec) => { statusEl.textContent = t("aiWait", sec); });
+    res = JSON.parse(state.bridge.ai_next(res.job, reply));
+  }
+  return res;
+}
+
+async function runAI(card, r, button) {
+  const statusEl = card.querySelector(".ai-status");
+  const s = aiSettingsOrPrompt(statusEl);
+  if (!s) return;
+  button.disabled = true;
+  try {
+    const res = await drive(() => state.bridge.ai_start(r.key, state.lang, s.provider, modelOf(s)), s, statusEl);
+    r.html = res.html;
+    r.json = res.json;
+    card.querySelector(".preview").srcdoc = r.html;
+    const frame = card.querySelector(".ai-frame");
+    frame.hidden = false;
+    frame.srcdoc = res.panel;
+    statusEl.textContent = t("aiDone", res.verification || {});
+    button.textContent = t("rerunAI");
+  } catch (err) {
+    console.error(err);
+    statusEl.textContent = t("aiFailed") + (err.message || err);
+  } finally {
+    button.disabled = false;
+  }
+}
+
+async function askFile(card, r) {
+  const input = card.querySelector(".ask-input");
+  const log = card.querySelector(".chat-log");
+  const question = input.value.trim();
+  const statusEl = card.querySelector(".ask-status");
+  if (!question) return;
+  const s = aiSettingsOrPrompt(statusEl);
+  if (!s) return;
+  const item = document.createElement("div");
+  item.className = "qa";
+  item.innerHTML = `<p class="q">${esc(question)}</p><p class="a">…</p>`;
+  log.prepend(item);
+  input.value = "";
+  try {
+    const res = await drive(() => state.bridge.chat_start(r.key, question, state.lang), s, statusEl);
+    item.querySelector(".a").textContent = res.answer;
+    statusEl.textContent = "";
+  } catch (err) {
+    item.querySelector(".a").textContent = t("aiFailed") + (err.message || err);
+  }
+}
+
+function initSettings() {
+  const s = loadSettings();
+  const sel = $("#ai-provider");
+  sel.innerHTML = Object.entries(PROVIDERS).map(([k, p]) => `<option value="${k}">${esc(p.label)}</option>`).join("");
+  sel.value = s.provider;
+  $("#ai-model").value = s.model || "";
+  $("#ai-key").value = s.key || "";
+  $("#ai-host").value = s.host || "http://localhost:11434";
+  $("#ai-remember").checked = Boolean(s.remember);
+  const sync = () => {
+    const p = PROVIDERS[sel.value];
+    $("#ai-model").placeholder = p.model;
+    $("#ai-key-row").hidden = !p.key;
+    $("#ai-host-row").hidden = p.key;
+    $("#ai-get-key").href = p.keyUrl;
+  };
+  sel.addEventListener("change", sync);
+  sync();
+  $("#ai-form").addEventListener("submit", (e) => {
+    e.preventDefault();
+    saveSettings({ provider: sel.value, model: $("#ai-model").value.trim(), key: $("#ai-key").value.trim(),
+      host: $("#ai-host").value.trim() || "http://localhost:11434", remember: $("#ai-remember").checked });
+    $("#ai-saved").textContent = t("saved");
+    setTimeout(() => { $("#ai-saved").textContent = ""; }, 2500);
+  });
 }
 
 async function analyse(files) {
@@ -258,6 +410,7 @@ for (const ev of ["dragleave", "drop"]) drop.addEventListener(ev, (e) => { e.pre
 drop.addEventListener("drop", (e) => analyse([...e.dataTransfer.files]));
 for (const b of document.querySelectorAll(".lang button")) b.addEventListener("click", () => applyLang(b.dataset.lang));
 
+initSettings();
 applyLang(navigator.language?.startsWith("ar") ? "ar" : "en");
 setStatus("loading");
 boot();
