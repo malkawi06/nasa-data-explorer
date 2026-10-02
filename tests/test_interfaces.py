@@ -105,7 +105,7 @@ def test_ai_data_prompt_has_no_raw_data(samples, tmp_path, monkeypatch):
     from nasa_explorer.pipeline import process_file
 
     rep = process_file(samples["netcdf4"][0], ReadOptions(), tmp_path, ai=True)
-    data = json.loads(rep.json_path.read_text())
+    data = json.loads(rep.json_path.read_text(encoding="utf-8"))
     assert data["ai"]["provider"] == "fake"
     assert len(fake.calls[0]) < 30000 and "ONLY the computed summary" in fake.calls[0]
 

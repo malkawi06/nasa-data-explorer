@@ -29,7 +29,7 @@ def test_every_format_reads_and_reports(samples, tmp_path):
                 f"{name}: reader={used} (want {reader_name}) kind={res.kind} (want {kind}) "
                 f"error={rep.error} problems={problems}"
             )
-        data = json.loads(rep.json_path.read_text())
+        data = json.loads(rep.json_path.read_text(encoding="utf-8"))
         assert data["analysis"] is not None
     assert not failures, "\n".join(failures)
 
@@ -67,7 +67,7 @@ def test_archives_expand_every_member(samples, tmp_path):
 def test_folder_run_writes_index(samples, tmp_path):
     folder = samples["csv"][0].parent
     reps = process(folder, out_dir=tmp_path / "all")
-    index = (tmp_path / "all" / "index.html").read_text()
+    index = (tmp_path / "all" / "index.html").read_text(encoding="utf-8")
     assert len(reps) >= len(samples) - 2
     assert "fires.csv" in index
     # shapefile sidecars are not reported separately
