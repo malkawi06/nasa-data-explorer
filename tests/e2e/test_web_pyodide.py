@@ -47,6 +47,7 @@ def test_formats_in_real_pyodide(samples, tmp_path):
         with pw.sync_playwright() as p:
             browser = p.chromium.launch(executable_path=chromium_path())
             ctx = browser.new_context()
+            _offline_routes(ctx)
             page = ctx.new_page()
             errors: list[str] = []
             page.on("pageerror", lambda e: errors.append(str(e)))
@@ -61,9 +62,9 @@ def test_formats_in_real_pyodide(samples, tmp_path):
                 timeout=600_000,
             )
             cards = page.eval_on_selector_all(
-                ".card",
-                "cs => cs.map(c => [c.querySelector('.file').textContent, "
-                "c.querySelector('.meta').textContent, c.querySelector('.err').hidden])",
+                ".file-item",
+                "cs => cs.map(c => [c.querySelector('.fi-name').textContent, "
+                "c.querySelector('.fi-meta').textContent, !c.querySelector('.fi-state.bad')])",
             )
             browser.close()
     finally:
@@ -82,3 +83,41 @@ def test_formats_in_real_pyodide(samples, tmp_path):
         assert by_file.get("points.shp", ("", False))[0] == "vector"
     assert not wrong, "\n".join(wrong)
     assert not errors, errors
+
+
+def _offline_routes(ctx) -> None:
+    """With PYODIDE_DIR set (an extracted Pyodide release), serve Pyodide from disk and fetch
+    PyPI wheels through Python, so the test runs where the CDN is blocked."""
+    root = os.environ.get("PYODIDE_DIR")
+    if not root:
+        return
+    import mimetypes
+    from pathlib import Path
+
+    import requests
+
+    def local(route):
+        name = route.request.url.split("/full/")[1].split("?")[0]
+        path = Path(root) / name
+        if not path.exists():
+            return route.fulfill(status=404)
+        kind = (
+            "text/javascript" if name.endswith((".mjs", ".js")) else mimetypes.guess_type(name)[0]
+        )
+        route.fulfill(
+            status=200, body=path.read_bytes(), content_type=kind or "application/octet-stream"
+        )
+
+    def remote(route):
+        resp = requests.get(route.request.url, timeout=60)
+        route.fulfill(
+            status=resp.status_code,
+            body=resp.content,
+            headers={
+                "content-type": resp.headers.get("content-type", "application/octet-stream"),
+                "access-control-allow-origin": "*",
+            },
+        )
+
+    ctx.route("https://cdn.jsdelivr.net/pyodide/**", local)
+    ctx.route(lambda u: u.startswith("https://") and "cdn.jsdelivr.net/pyodide" not in u, remote)

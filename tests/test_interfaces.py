@@ -148,7 +148,7 @@ def test_gemini_switches_to_newest_flash_when_model_is_retired(monkeypatch):
     """Google retires model names (e.g. gemini-2.5-flash for new users); we must recover."""
     from types import SimpleNamespace
 
-    from google.genai import errors
+    errors = pytest.importorskip("google.genai.errors")
 
     gem = ai.Gemini.__new__(ai.Gemini)
     gem.model = "gemini-2.5-flash"
