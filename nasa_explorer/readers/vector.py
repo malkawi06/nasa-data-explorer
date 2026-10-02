@@ -18,18 +18,32 @@ def _sniff(head: bytes) -> bool:
     return ('"FeatureCollection"' in t or '"Feature"' in t and '"geometry"' in t) or "<kml" in t
 
 
+def _list_layers(src: str) -> list[str]:
+    """pyogrio when installed, fiona otherwise (e.g. in the Pyodide browser build)."""
+    try:
+        import pyogrio
+
+        return [str(row[0]) for row in pyogrio.list_layers(src)]
+    except ImportError:
+        import fiona
+
+        # fiona ships KML read support but leaves it switched off by default
+        for driver in ("KML", "LIBKML"):
+            fiona.drvsupport.supported_drivers.setdefault(driver, "r")
+        return list(fiona.listlayers(src))
+
+
 @reader(
     "vector",
     category="Geospatial",
     extensions=(".shp", ".geojson", ".kml", ".kmz", ".gpkg", ".gml", ".fgb", ".topojson"),
     sniff=_sniff,
-    requires=("geopandas", "pyogrio"),
+    requires=("geopandas",),
     extra="geo",
     priority=30,
 )
 def read_vector(path: Path, opts: ReadOptions) -> ReadResult:
     import geopandas as gpd
-    import pyogrio
 
     src = str(path)
     if path.suffix.lower() == ".kmz":
@@ -37,7 +51,7 @@ def read_vector(path: Path, opts: ReadOptions) -> ReadResult:
             kml = next((n for n in zf.namelist() if n.lower().endswith(".kml")), None)
         if kml:
             src = f"/vsizip/{path}/{kml}"
-    layers = [str(row[0]) for row in pyogrio.list_layers(src)]
+    layers = _list_layers(src)
     frames = {}
     for layer in layers[:50]:
         try:
