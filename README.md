@@ -1,8 +1,43 @@
 # nasa-data-explorer
 
-Drop in almost any scientific data file and understand it in minutes. Built as a
-generic helper for the **NASA Space Apps Challenge 2026**, not as a solution to one
-challenge.
+**Which places on Earth best stand in for a permanent lunar south-polar base, a Mars landing
+site or a Mars polar site, and why?** (NASA Space Apps 2026: *Identify Earth locations that
+analog the permanent Moon base locations and Mars*.)
+
+nasa-data-explorer ranks Earth sites against each target with evidence you can audit. It uses
+NASA POWER climate for any point, the terrain of any elevation model (Earth, Moon or Mars) and
+vegetation (NDVI). Every factor shows its value, weight and the reason it matters. Every score
+comes with the range it moves through when the hand-set weights and levels change. It all runs
+in the browser: https://malkawi06.github.io/nasa-data-explorer/
+
+Results with real POWER 2001-2020 climatology for the five sites saved in `tests/data/power`.
+Irbid, a farmed city, is the control. The range is the 90% score range under weights ±30% and
+levels ±20%:
+
+| Target | 1st | 2nd | Lowest |
+|---|---|---|---|
+| Moon south-polar base | McMurdo Dry Valleys 90 (85-94) | Haughton Crater 74 (65-82) | Irbid, Jordan 8 |
+| Mars low-latitude landing site | Atacama 65 (58-70) | Wadi Rum, Jordan 58 (51-65) | Haughton Crater 11 |
+| Mars polar site | McMurdo Dry Valleys 88 (82-93) | Haughton Crater 59 (49-68) | Irbid, Jordan 8 |
+
+**What the score is not** (read this before quoting a number):
+- **It is not validated.** It is a transparent screening heuristic. The levels and weights are
+  documented assumptions in `nasa_explorer/analog.py`, not fitted values.
+- **The check is in-sample.** Known analogs always outrank the other sites, but the levels were
+  set knowing those sites. On these climate-only sites one factor alone (latitude, rainfall or
+  temperature) separates them just as well, and the report says so.
+- **Scores are per target.** A polar site is a poor hot-desert Mars analog by design (Dry
+  Valleys: 88 as a Mars polar analog, 29 as a low-latitude one).
+- **It leaves out what defines a Moon base site.** Illumination and Earth visibility from a
+  lunar DEM, regolith and geology/mineralogy are not modelled yet. For the Moon target, terrain
+  carries most of the weight; without a DEM the score is a climate and latitude proxy.
+- **POWER values are cell averages**, about 0.5° (MERRA-2) and 1° (CERES), not point
+  measurements.
+
+### Under the hood: a reader for almost any NASA file
+
+The analog evidence comes from a general analyzer. Drop in almost any scientific data file and
+get a report in minutes.
 
 For every file it detects the format (by extension, then by magic bytes), reads it,
 and writes an HTML report plus a JSON summary with:
@@ -123,9 +158,10 @@ Each factor maps a measurable value (NASA POWER 2001-2020 climatology, DEM terra
 "not analog" (0) to "fully analog" (100); the weights and thresholds are documented in
 `nasa_explorer/analog.py`. The report shows every factor with its value, score, weight and the
 reason it matters, plus the data coverage. 24 built-in sites (expert-chosen analogs such as Atacama,
-Haughton, the Dry Valleys, plus candidates in Jordan) are scored with your own, so the ranking is
-checked against expert choices. With real POWER data the method puts the Dry Valleys first for
-the Moon, Atacama then Wadi Rum first for Mars landing sites.
+Haughton, the Dry Valleys, plus candidates in Jordan) are scored with your own, so the ranking can
+be compared with expert choices. Every score also gets the range it moves through over 1000
+re-scorings with weights ±30% and levels ±20%. The comparison with single-factor baselines is
+in-sample (see the caveats at the top).
 
 On the website: *Moon / Mars analog finder* and *NASA POWER climate for any point* in the sidebar.
 DEM or NDVI files you analysed that cover a site add terrain and vegetation to its score; an Earth
@@ -168,12 +204,19 @@ The AI layer is configured with environment variables or a `.env` file (gitignor
 - **Structured answers:** the model returns JSON. For data files that is overview, key findings,
   issues, next analyses, visualizations, hackathon ideas and caveats. For papers it is problem,
   method, data used, findings, limitations, NASA datasets and ideas.
-- **Every number is checked:**
+- **Every number is traced (not proven true):**
   - For data files, each finding must cite a *fact path* such as `statistics.t2m.mean`, and the
     value is compared with what the tool computed.
   - For papers, each claim must cite a page, and its numbers, quote or dataset name must appear
     on that page.
   - Each finding gets a badge: ✓ verified, ✗ wrong, ? not verified, or · no number.
+  - "Verified" means consistent with what the tool computed, not that the computation or the
+    sentence's wording is right. A number is only matched against the cited fact and its own
+    variable, plus dates and counts. A finding that cites nothing and names no variable stays
+    unverified. In the tests, findings with planted wrong numbers come out "verified" in under 5%
+    of cases (1.4% on the ten-file test set), and the correct ones in over 85%.
+  - File text sent to the model is marked as data, not instructions. This lowers the risk of
+    prompt injection from a paper but does not remove it.
 - **Review round:** if any claim fails, the model gets one round to fix it, with the exact
   problems listed. Claims it cannot support stay flagged and are never hidden.
 - **Trusted context:** the model also receives the automatic quality checks and the recognised

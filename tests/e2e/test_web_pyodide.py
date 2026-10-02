@@ -47,7 +47,7 @@ def test_formats_in_real_pyodide(samples, tmp_path):
     try:
         with pw.sync_playwright() as p:
             browser = p.chromium.launch(executable_path=chromium_path())
-            ctx = browser.new_context()
+            ctx = browser.new_context(bypass_csp=True)  # wait_for_function uses eval
             _offline_routes(ctx)
             page = ctx.new_page()
             errors: list[str] = []

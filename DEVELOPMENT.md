@@ -63,6 +63,11 @@ Generic "drop any NASA/scientific file in, get a report" tool for Space Apps hac
   Browsers' `JSON.parse` rejects them.
 - Playwright: use `context.route`, not `page.route`, or requests made from the worker are not
   intercepted.
+- `web/index.html` sets a strict CSP (no inline scripts, no eval): never add inline `<script>` or
+  `on*=` handlers. Playwright's `wait_for_function` evaluates strings, so test contexts that use
+  it pass `bypass_csp=True`; `test_file_content_cannot_run_script` runs with the policy on.
+- Analog scores are screening heuristics. `analog.robustness` re-scores with weights ±30% and
+  levels ±20%; keep the README caveats in sync when targets, weights or levels change.
 - Always pass `encoding="utf-8"` to file reads and writes: reports contain → × and Arabic, and
   Windows defaults to cp1252.
 - The AI cache key includes the provider *model* name. Scripted FakeProvider runs in one test

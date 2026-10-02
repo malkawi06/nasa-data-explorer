@@ -3,6 +3,9 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
+  <!-- Reports show text taken from the user's files: no inline or foreign scripts may run.
+       connect-src stays open to https and localhost for POWER, AI providers and Ollama. -->
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self'; worker-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; font-src 'self' data:; connect-src 'self' https: http://localhost:* http://127.0.0.1:*; object-src 'none'; base-uri 'none'; form-action 'none'">
   <title>NASA Data Explorer</title>
   <meta name="description" content="Drop any NASA or scientific data file and get an instant analysis report. Runs entirely in your browser.">
   <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Ccircle cx='16' cy='16' r='14' fill='%232a78d6'/%3E%3Cpath d='M6 20c6-1 14-6 20-12' stroke='%23fff' stroke-width='2.5' fill='none'/%3E%3C/svg%3E">

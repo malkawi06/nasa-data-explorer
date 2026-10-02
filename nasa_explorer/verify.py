@@ -144,24 +144,29 @@ def numbers_in(text: str) -> list[tuple[str, float]]:
             continue  # "significant at 95%" names a confidence level
         raw = m.group(0).replace("−", "-").replace(",", "")
         try:
-            found.append((m.group(0), float(raw)))
+            value = float(raw)
         except ValueError:
             continue
+        found.append((m.group(0) + ("%" if after.lstrip().startswith("%") else ""), value))
     return found
 
 
 def _tolerance(raw: str, value: float) -> float:
     """Half a unit in the last digit the model wrote, but at least REL_TOL relative."""
-    digits = raw.split(".")[1] if "." in raw else ""
-    digits = re.sub(r"[eE].*", "", digits)
-    return max(0.5 * 10 ** (-len(digits)) if "." in raw else 0.5, REL_TOL * abs(value), 1e-12)
+    mantissa, _, exponent = raw.rstrip("%").lower().partition("e")
+    digits = mantissa.split(".")[1] if "." in mantissa else ""
+    unit = 0.5 * 10.0 ** (int(exponent or 0) - len(digits))  # "3e-05" is good to 0.5e-05
+    return max(unit, REL_TOL * abs(value), 1e-12)
 
 
 def close(raw: str, value: float, target: Any) -> bool:
+    """Equal within rounding. A fraction may be written as a percentage ("0.25" as "25%"), but
+    only when the text says %, so 30 cannot pass for an unrelated 0.3."""
     if not isinstance(target, int | float) or isinstance(target, bool):
         return False
     tol = _tolerance(raw, value)
-    return any(abs(value - target * scale) <= tol for scale in (1.0, 100.0))
+    scales = (1.0, 100.0) if raw.endswith("%") and abs(target) <= 1 else (1.0,)
+    return any(abs(value - target * scale) <= tol for scale in scales)
 
 
 def _numeric_facts(f: dict[str, Any]) -> list[float]:
@@ -177,12 +182,11 @@ def _numeric_facts(f: dict[str, Any]) -> list[float]:
 
 def verify_data(result: dict, f: dict[str, Any]) -> dict:
     """Label each finding; returns the result with `status`/`note` added and a summary."""
-    pool = _numeric_facts(f)
     counts = {"verified": 0, "mismatch": 0, "unsupported": 0, "qualitative": 0}
     for item in result.get("findings", []) or []:
         if not isinstance(item, dict):
             continue
-        status, note = _check_finding(item, f, pool)
+        status, note = _check_finding(item, f)
         item["status"], item["note"] = status, note
         counts[status] += 1
     result["verification"] = counts
@@ -216,7 +220,15 @@ def _significance_problem(path: str, text: str, f: dict[str, Any]) -> str | None
     return None
 
 
-def _check_finding(item: dict, f: dict[str, Any], pool: list[float]) -> tuple[str, str]:
+def _context(f: dict[str, Any], keep) -> list[float]:
+    """Facts a sentence may also quote: the ones `keep` selects, plus coverage and sizes
+    (dates, counts). Never the whole fact list: any number would match something there."""
+    return _numeric_facts(
+        {k: v for k, v in f.items() if keep(k) or k.startswith(("coverage", "summary"))}
+    )
+
+
+def _check_finding(item: dict, f: dict[str, Any]) -> tuple[str, str]:
     path = str(item.get("fact") or "").strip()
     value = item.get("value")
     nums = numbers_in(str(item.get("text", "")))
@@ -230,6 +242,8 @@ def _check_finding(item: dict, f: dict[str, Any], pool: list[float]) -> tuple[st
             and not close(str(value), float(value), target)
         ):
             return "mismatch", f"{path} is {_fmt(target)}, not {_fmt(value)}"
+        prefix = ".".join(path.split(".")[:2])  # e.g. trends.T2M: its other numbers may appear
+        pool = _context(f, lambda k: k.startswith(prefix))
         bad = [
             r for r, v in nums if not close(r, v, target) and not any(close(r, v, p) for p in pool)
         ]
@@ -242,11 +256,10 @@ def _check_finding(item: dict, f: dict[str, Any], pool: list[float]) -> tuple[st
         return "qualitative", ""
     # without a cited path, prefer facts about the variable the sentence names
     text = str(item.get("text", "")).lower()
-    named = {k: v for k, v in f.items() if "." in k and k.split(".")[1].lower() in text}
-    if named:
-        pool = _numeric_facts(
-            {**named, **{k: v for k, v in f.items() if k.startswith(("coverage", "summary"))}}
-        )
+    named = {k for k in f if "." in k and k.split(".")[1].lower() in text}
+    if not named:
+        return "unsupported", "no fact cited and no variable named: the numbers cannot be traced"
+    pool = _context(f, named.__contains__)
     bad = [r for r, v in nums if not any(close(r, v, p) for p in pool)]
     if bad:
         return "unsupported", f"number(s) {', '.join(bad)} not found in the computed facts"

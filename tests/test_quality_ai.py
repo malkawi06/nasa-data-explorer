@@ -126,6 +126,31 @@ def test_report_has_quality_trend_map_and_ai_placeholder(samples, tmp_path):
     assert "ai-panel" in html and "Not run yet" in html and "Quality checks" in html
 
 
+def test_planted_wrong_numbers_are_rarely_verified(samples, tmp_path):
+    """Adversarial check of the verifier: every numeric fact is claimed with a wrong value
+    (with and without citing it). Wrong claims must almost never come out 'verified', while
+    the same sentences with the right value still do."""
+    rng = np.random.default_rng(0)
+    wrong_ok = wrong = right_ok = right = 0
+    for key in ("netcdf4", "csv", "power_header_csv"):
+        f = verify.facts(process_file(samples[key][0], ReadOptions(plots=False), tmp_path).analysis)
+        for path, v in f.items():
+            if isinstance(v, bool) or not isinstance(v, int | float) or v == 0:
+                continue
+            name = path.split(".")[1] if "." in path else path
+            bad = v * rng.choice([0.37, 1.6, 2.3, 4.0, -1.0]) + rng.choice([0, 7, 13])
+            for cite in (path, ""):
+                for value, is_wrong in ((bad, True), (v, False)):
+                    item = {"fact": cite, "text": f"{name} is {value:.4g}"}
+                    status = verify.verify_data({"findings": [item]}, f)["findings"][0]["status"]
+                    if is_wrong:
+                        wrong, wrong_ok = wrong + 1, wrong_ok + (status == "verified")
+                    else:
+                        right, right_ok = right + 1, right_ok + (status == "verified")
+    assert wrong > 100 and wrong_ok / wrong < 0.05, (wrong_ok, wrong)
+    assert right_ok / right > 0.85, (right_ok, right)
+
+
 def test_verify_data_statuses(samples, tmp_path):
     a = process_file(samples["netcdf4"][0], ReadOptions(), tmp_path).analysis
     f = verify.facts(a)

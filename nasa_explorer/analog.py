@@ -50,18 +50,30 @@ TARGETS: dict[str, Target] = {
             "moon_south_pole",
             "Moon - permanent south-polar base",
             "Moon",
-            "Cold, dry, airless, cratered ground with the Sun near the horizon (Artemis region).",
+            "Cold, dry, airless, cratered ground with the Sun near the horizon (Artemis region). "
+            "The Moon has no weather: terrain carries most of the weight, and climate counts only "
+            "for cold operations and unweathered ground. Without a DEM the score is a proxy.",
             (
                 Factor(
-                    "t_mean_c",
-                    "Mean air temperature",
-                    "°C",
-                    25,
-                    -25,
+                    "depressions_per_1000_km2",
+                    "Crater-like depressions",
+                    "per 1000 km²",
+                    0.5,
+                    20,
                     3,
-                    "The lunar south pole is extremely cold (shadowed craters stay below about 110 K); "
-                    "cold Earth sites test thermal control, batteries and cryogenic handling.",
+                    "The lunar highlands are densely cratered; closed depressions in a DEM approximate crater density.",
+                    log=True,
                 ),
+                Factor(
+                    "flat_lt10_pct",
+                    "Flat ground (<10°)",
+                    "%",
+                    30,
+                    80,
+                    2,
+                    "Landing and base pads need gentle slopes, typically under about 10°.",
+                ),
+                Factor("ndvi", "Vegetation (NDVI)", "", 0.4, 0.05, 2, NDVI_WHY),
                 Factor(
                     "abs_lat",
                     "Latitude",
@@ -73,52 +85,24 @@ TARGETS: dict[str, Target] = {
                     "angles, long shadows and long polar days and nights for lighting and power tests.",
                 ),
                 Factor(
+                    "t_mean_c",
+                    "Mean air temperature",
+                    "°C",
+                    25,
+                    -25,
+                    1.5,
+                    "Shadowed lunar craters stay below about 110 K; cold Earth sites test thermal "
+                    "control, batteries and cryogenic handling (an operations factor, not climate).",
+                ),
+                Factor(
                     "precip_mm_yr",
                     "Precipitation",
                     "mm/yr",
                     500,
                     20,
-                    2,
-                    "The Moon has no liquid water or weather; very dry sites keep the ground dusty and unweathered.",
-                    log=True,
-                ),
-                Factor(
-                    "rh_pct",
-                    "Relative humidity",
-                    "%",
-                    85,
-                    40,
-                    0.5,
-                    "Dry air approximates a volatile-poor environment (low weight: cold air reads high in relative humidity).",
-                ),
-                Factor(
-                    "t_range_c",
-                    "Daily temperature swing",
-                    "°C",
-                    4,
-                    15,
                     1,
-                    "Day-night thermal cycling stresses equipment, as on the lunar surface.",
-                ),
-                Factor("ndvi", "Vegetation (NDVI)", "", 0.4, 0.05, 2, NDVI_WHY),
-                Factor(
-                    "depressions_per_1000_km2",
-                    "Crater-like depressions",
-                    "per 1000 km²",
-                    0.5,
-                    20,
-                    2,
-                    "The lunar highlands are densely cratered; closed depressions in a DEM approximate crater density.",
+                    "The Moon has no liquid water; very dry sites keep the ground dusty and unweathered.",
                     log=True,
-                ),
-                Factor(
-                    "flat_lt10_pct",
-                    "Flat ground (<10°)",
-                    "%",
-                    30,
-                    80,
-                    1,
-                    "Landing and base pads need gentle slopes, typically under about 10°.",
                 ),
             ),
             known_tag="Moon",
@@ -455,7 +439,103 @@ def rank(sites: list[dict], features: list[dict | None], target_key: str) -> dic
         "description": target.description,
         "ranking": rows,
         "validation": check,
+        "robustness": robustness(rows, target),
     }
+
+
+WEIGHT_JITTER = 0.30  # each weight x U(0.7, 1.3)
+LEVEL_JITTER = 0.20  # each 0 / 100 level moved by up to 20% of the ramp length
+DRAWS = 1000
+
+
+def _auc(scores: np.ndarray, known: np.ndarray) -> np.ndarray:
+    """Share of (known analog, other site) pairs where the known analog scores higher
+    (ties count half), for each row of `scores`."""
+    k, o = scores[..., known], scores[..., ~known]
+    diff = k[..., :, None] - o[..., None, :]
+    return ((diff > 0) + 0.5 * (diff == 0)).mean(axis=(-1, -2))
+
+
+def robustness(rows: list[dict], target: Target, draws: int = DRAWS, seed: int = 0) -> dict | None:
+    """How much the ranking depends on the hand-set weights and levels: re-score every site
+    under random weights (±30%) and levels (±20%). Adds each site's 90% score and rank range,
+    and compares the score with single-factor baselines on the known analogs (in-sample: the
+    levels were set knowing these sites, so this checks consistency, not predictive skill)."""
+    scored = [r for r in rows if r.get("score") is not None and r.get("features")]
+    if len(scored) < 3:
+        return None
+    fs = target.factors
+    logs = np.array([f.log for f in fs])
+
+    def tr(a):
+        return np.where(logs, np.log10(np.maximum(a, 1e-3)), a)
+
+    x = np.array(
+        [
+            [
+                np.nan if r["features"].get(f.key) is None else float(r["features"][f.key])
+                for f in fs
+            ]
+            for r in scored
+        ]
+    )
+    have = np.isfinite(x)
+    x = tr(np.nan_to_num(x))
+    zero, one = tr(np.array([f.zero for f in fs])), tr(np.array([f.one for f in fs]))
+    span = one - zero
+    rng = np.random.default_rng(seed)
+    w = np.array([f.weight for f in fs]) * rng.uniform(
+        1 - WEIGHT_JITTER, 1 + WEIGHT_JITTER, (draws, len(fs))
+    )
+    z = zero + span * rng.uniform(-LEVEL_JITTER, LEVEL_JITTER, (draws, len(fs)))
+    o = one + span * rng.uniform(-LEVEL_JITTER, LEVEL_JITTER, (draws, len(fs)))
+    part = np.clip((x[None] - z[:, None]) / (o - z)[:, None], 0, 1)  # draws x sites x factors
+    ww = w[:, None, :] * have[None]
+    sc = 100 * (part * ww).sum(-1) / ww.sum(-1)
+    ranks = (-sc).argsort(axis=1).argsort(axis=1) + 1
+    lo_s, hi_s = np.percentile(sc, [5, 95], axis=0)
+    lo_r, hi_r = np.percentile(ranks, [5, 95], axis=0)
+    for i, r in enumerate(scored):
+        r["score_range"] = [round(float(lo_s[i])), round(float(hi_s[i]))]
+        r["rank_range"] = [int(round(lo_r[i])), int(round(hi_r[i]))]
+    out = {
+        "draws": draws,
+        "weights_pm_pct": round(100 * WEIGHT_JITTER),
+        "levels_pm_pct": round(100 * LEVEL_JITTER),
+    }
+    known = np.array([target.known_tag in _tags(r.get("analog_for", "")) for r in scored])
+    if known.all() or not known.any():
+        out["text"] = (
+            f"Scores re-computed {draws} times with weights ±{out['weights_pm_pct']}% and levels "
+            f"±{out['levels_pm_pct']}%: the ranges show how much each score depends on them."
+        )
+        return out
+    nominal = float(_auc(np.array([r["score"] for r in scored], float), known))
+    aucs = _auc(sc, known)
+    single = {}
+    for j, f in enumerate(fs):  # each factor alone, on the sites that have it
+        if have[:, j].sum() >= 3 and known[have[:, j]].any() and (~known[have[:, j]]).any():
+            alone = np.clip((x[have[:, j], j] - zero[j]) / span[j], 0, 1)
+            single[f.label] = float(_auc(alone, known[have[:, j]]))
+    best = max(single.items(), key=lambda kv: kv[1]) if single else None
+    out.update(
+        auc=round(nominal, 2),
+        auc_range=[round(float(v), 2) for v in np.percentile(aucs, [5, 95])],
+        best_single_factor={"label": best[0], "auc": round(best[1], 2)} if best else None,
+    )
+    beat = (
+        f"; the best single factor ({best[0]}) alone gives {best[1]:.2f}"
+        + (" - the combined score adds nothing over it here" if best[1] >= nominal else "")
+        if best
+        else ""
+    )
+    out["text"] = (
+        f"Known {target.known_tag} analogs outscore the other sites in {nominal:.0%} of pairs "
+        f"(90% range {out['auc_range'][0]:.0%}-{out['auc_range'][1]:.0%} when weights vary "
+        f"±{out['weights_pm_pct']}% and levels ±{out['levels_pm_pct']}%){beat}. In-sample check: "
+        "the levels were set knowing these sites, so it shows consistency, not predictive skill."
+    )
+    return out
 
 
 def _jsd(p: np.ndarray, q: np.ndarray) -> float:

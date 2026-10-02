@@ -461,8 +461,11 @@ def _ranking(rk: dict, L: dict) -> str:
     out = [
         f"<p><b>{html.escape(_target_name(rk['target'], L))}</b>: {html.escape(rk.get('description', ''))}</p>"
     ]
+    out.append(f"<p class='muted small'>{html.escape(L['screening_note'])}</p>")
     if v := rk.get("validation"):
         out.append(f"<div class='card'>✔ {html.escape(v['text'])}</div>")
+    if rb := rk.get("robustness"):
+        out.append(f"<div class='card'>{html.escape(rb['text'])}</div>")
     rows = [
         {
             "#": r["rank"],
@@ -472,6 +475,8 @@ def _ranking(rk: dict, L: dict) -> str:
             if r.get("analog_for")
             else L["candidate"],
             L["analog_score"]: "—" if r.get("score") is None else f"{r['score']}/100",
+            L["score_range"]: "{}-{}".format(*r["score_range"]) if r.get("score_range") else "—",
+            L["rank_range"]: "{}-{}".format(*r["rank_range"]) if r.get("rank_range") else "—",
             L["data_coverage"]: f"{r.get('coverage_pct', 0)}%",
         }
         for r in rk.get("ranking", [])

@@ -479,10 +479,13 @@ def analog_bars(rows: list[dict], title: str) -> bytes:
         )
         left += np.asarray(part)
     for y, r in enumerate(rows):
-        ax.text(left[y] + 1, y, f"{r['score']}", va="center", fontsize=8, color=INK)
+        lo, hi = r.get("score_range") or (r["score"], r["score"])
+        if hi > lo:  # how far the score moves when weights and levels vary
+            ax.plot([lo, hi], [y, y], color=INK, lw=1.2, solid_capstyle="butt")
+        ax.text(max(left[y], hi) + 1, y, f"{r['score']}", va="center", fontsize=8, color=INK)
     ax.set_yticks(range(len(rows)), [r["name"][:42] for r in rows], fontsize=9.5)
     ax.set_xlim(0, 105)
-    ax.set_xlabel("analog score (0-100), split into factor contributions")
+    ax.set_xlabel("analog score (0-100), split into factor contributions; line = 90% range")
     ax.legend(
         frameon=False,
         fontsize=7.5,

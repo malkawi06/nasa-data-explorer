@@ -19,8 +19,7 @@ def _gemini_reply(text: str) -> dict:
     return {"candidates": [{"content": {"parts": [{"text": text}]}}]}
 
 
-@pytest.fixture()
-def page(tmp_path):
+def _open(tmp_path, strict_csp: bool):
     server = Server(tmp_path / "work")
     with pw.sync_playwright() as p:
         try:
@@ -28,7 +27,10 @@ def page(tmp_path):
         except Exception as exc:
             server.close()
             pytest.skip(f"no Chromium available: {exc}")
-        ctx = browser.new_context(viewport={"width": 1100, "height": 900})
+        # Playwright's wait_for_function evaluates strings, which the page's CSP forbids
+        ctx = browser.new_context(
+            viewport={"width": 1100, "height": 900}, bypass_csp=not strict_csp
+        )
         pg = ctx.new_page()
         errors: list[str] = []
         pg.on("pageerror", lambda e: errors.append(str(e)))
@@ -42,6 +44,16 @@ def page(tmp_path):
         yield pg
         browser.close()
     server.close()
+
+
+@pytest.fixture()
+def page(tmp_path):
+    yield from _open(tmp_path, strict_csp=False)
+
+
+@pytest.fixture()
+def strict_page(tmp_path):
+    yield from _open(tmp_path, strict_csp=True)
 
 
 def _report_text(page) -> str:
@@ -126,3 +138,22 @@ def test_arabic_mobile_and_queue_before_ready(page, samples):
     assert page.evaluate("document.documentElement.scrollWidth <= innerWidth")
     assert "تحليل الذكاء الاصطناعي" in page.locator("[data-tab=ai]").inner_text()
     assert 'dir="rtl"' in _report_text(page)
+
+
+def test_file_content_cannot_run_script(strict_page, tmp_path):
+    page = strict_page
+    csp: list[str] = []
+    page.on(
+        "console", lambda m: csp.append(m.text) if "Content Security Policy" in m.text else None
+    )
+    evil = tmp_path / "evil.csv"
+    head = '<img src=x onerror="window.__xss=1">,<script>window.__xss=2</script>'
+    evil.write_text(head + "\n" + "\n".join(f"{i},{i * 2}" for i in range(30)), encoding="utf-8")
+    page.set_input_files("#file-input", [str(evil)])
+    page.wait_for_selector(".file-item:not(.pending)", timeout=60000)
+    page.wait_for_timeout(500)
+    root = "document.querySelector('.preview').shadowRoot"
+    assert page.evaluate("window.__xss") is None
+    assert page.evaluate(f"{root}.querySelectorAll('[onerror], script').length") == 0
+    assert "&lt;img src=x" in _report_text(page)  # shown as text
+    assert not csp, csp  # the policy does not get in the way of the app itself

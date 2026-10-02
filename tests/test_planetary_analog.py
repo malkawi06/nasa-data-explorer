@@ -351,3 +351,25 @@ def test_planetary_radius_stats_and_grouped_quality(tmp_path):
     st = a["statistics"][a["terrain"]["variable"]]
     assert abs(st["p50"]) < 5 and st["min"] < -60  # heights, not radii
     assert "outliers" not in {q["code"] for q in a["quality"]}  # craters are not outliers
+
+
+def test_ranking_reports_weight_sensitivity_and_baselines():
+    names = {
+        "atacama": "Atacama Desert (Yungay), Chile",
+        "dry_valleys": "McMurdo Dry Valleys, Antarctica",
+        "haughton": "Haughton Crater, Devon Island, Canada",
+        "wadi_rum": "Wadi Rum, Jordan",
+    }
+    sites = [next(s for s in analog.SITES if s["name"] == n) for n in names.values()]
+    sites.append({"name": "Irbid, Jordan", "lat": 32.55, "lon": 35.85, "analog_for": ""})
+    feats = [
+        analog.climate_features(json.loads((DATA / f"{k}.json").read_text(encoding="utf-8")))
+        for k in [*names, "irbid"]
+    ]
+    rk = analog.rank(sites, feats, "mars_polar")
+    rb = rk["robustness"]
+    assert rb["draws"] == analog.DRAWS and 0 <= rb["auc_range"][0] <= rb["auc"] + 1e-9
+    assert rb["best_single_factor"] and "In-sample" in rb["text"]
+    for r in rk["ranking"]:
+        lo, hi = r["score_range"]
+        assert lo <= r["score"] <= hi and r["rank_range"][0] <= r["rank"] <= r["rank_range"][1]

@@ -237,8 +237,21 @@ $("#files").addEventListener("click", (e) => {
 
 // Reports are complete HTML pages; render them in a shadow root so their styles stay
 // scoped while the page scrolls normally (sticky section bar, no iframe height hacks).
+// Report text comes from the user's files. The Python side escapes it; this second line of
+// defence drops anything that could still run code (the page's CSP blocks it too).
+function sanitize(node) {
+  node.querySelectorAll("script,iframe,object,embed,form,base,meta,link").forEach((el) => el.remove());
+  for (const el of node.querySelectorAll("*")) {
+    for (const { name, value } of [...el.attributes]) {
+      const url = /^(href|src|xlink:href|action|formaction)$/i.test(name);
+      if (/^on/i.test(name) || (url && /^\s*(javascript|vbscript):/i.test(value))) el.removeAttribute(name);
+    }
+  }
+}
+
 function renderInto(host, html) {
   const doc = new DOMParser().parseFromString(html, "text/html");
+  sanitize(doc.body);
   const css = [...doc.querySelectorAll("style")].map((s) => s.textContent).join("\n")
     .replace(/:root/g, ":host").replace(/(^|[}\s])body\s*\{/g, "$1:host{display:block;");
   const root = host.shadowRoot || host.attachShadow({ mode: "open" });
