@@ -119,6 +119,38 @@ The AI layer is configured with environment variables or a `.env` file (gitignor
   `[file, p. N]`. Without one it lists the best passages.
 - Without any provider, everything except the AI text works.
 
+## Web app (Netlify, runs in the browser)
+
+`web/` is a static site that runs the same `nasa_explorer` package in the visitor's browser with
+[Pyodide](https://pyodide.org). There is no server: files are never uploaded, and hosting is free.
+
+**Deploy:**
+1. Netlify → *Add new site* → *Import an existing project* → pick this GitHub repo.
+2. Keep the defaults; `netlify.toml` already sets them. The build runs
+   `python3 web/build.py` and publishes `web/dist`.
+3. Every push to `main` redeploys.
+
+**Run it locally:**
+```bash
+python web/build.py
+python -m http.server -d web/dist 8000
+```
+Then open http://localhost:8000.
+
+**What works in the browser:**
+- CSV/TSV/TXT, Excel, JSON, Parquet, NetCDF, HDF5, Zarr, GeoTIFF, Shapefile/GeoJSON/KML/GPKG, FITS,
+  images, PDF (text through pypdf), DOCX, HTML, Markdown, and ZIP/TAR/GZ archives.
+- Extra libraries load the first time a format needs them.
+
+**Desktop CLI only:**
+- GRIB, HDF4, OCR of scanned PDFs, and PDF table extraction. These need native libraries
+  Pyodide does not have.
+- Files larger than about 600 MB, because of the browser's memory limits.
+- The AI layer, so that API keys never sit in a public page.
+
+The first visit downloads about 40 MB (Python plus the scientific stack). After that the browser
+caches it.
+
 ## Adding a new reader
 
 Create one file in `nasa_explorer/readers/`. It is imported automatically:

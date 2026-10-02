@@ -18,6 +18,9 @@ Generic "drop any NASA/scientific file in, get a report" tool for Space Apps hac
 - `pipeline.py`: file, archive and folder handling, report/JSON/chunk writing, index.html.
 - `report.py`: HTML rendering. `plots.py`: matplotlib with the fixed CVD-safe palette.
 - `ai.py`: providers, cache, backoff and prompts. `qa.py`: retrieval (sentence-transformers or TF-IDF).
+- `web/`: Netlify static site; Pyodide runs the package in-browser. `bridge.py` is the only
+  JS↔Python surface (JSON strings in and out). `build.py` zips the package into `web/dist/`.
+  The Pyodide version and package lists live at the top of `app.js`.
 
 ## Gotchas
 - **eccodes vs GDAL/cartopy**: always call `_native.preload_before_eccodes()` before importing
@@ -26,4 +29,9 @@ Generic "drop any NASA/scientific file in, get a report" tool for Space Apps hac
 - HDF4 uses `scale * (raw - offset)` (MODIS), CF uses `raw * scale + offset`. See `readers/_cf.py`.
 - Tabular analysis treats -9999/-999/... as missing (NASA POWER, FIRMS conventions) and logs it in notes.
 - Report f-strings must stay Python 3.10 compatible (no nested same-type quotes).
+- The browser build has no pyogrio, pymupdf, eccodes or pyhdf. Readers must keep heavy imports
+  inside the function and declare them in `requires`, so the registry disables them cleanly.
+  The page then loads the missing modules on demand and retries (`PROVIDERS` in `app.js`).
+- Always pass `encoding="utf-8"` to file reads and writes: reports contain → × and Arabic, and
+  Windows defaults to cp1252.
 - Tests force `NASA_EXPLORER_EMBEDDINGS=tfidf` and clear AI keys; AI is tested with a fake provider.
