@@ -79,14 +79,14 @@ def test_missing_dependency_message(tmp_path, monkeypatch):
 class FakeProvider:
     name, model = "fake", "fake-1"
 
-    def __init__(self, fail_times=0):
-        self.calls, self.fail_times = [], fail_times
+    def __init__(self, fail_times=0, replies=None):
+        self.calls, self.fail_times, self.replies = [], fail_times, list(replies or [])
 
-    def complete(self, prompt, system):
+    def complete(self, prompt, system, json_mode=False):
         self.calls.append(prompt)
         if len(self.calls) <= self.fail_times:
             raise ai.RateLimited(retry_after=0.01)
-        return f"answer #{len(self.calls)}"
+        return self.replies.pop(0) if self.replies else f"answer #{len(self.calls)}"
 
 
 def test_ai_cache_and_backoff(capsys):
@@ -107,15 +107,16 @@ def test_ai_data_prompt_has_no_raw_data(samples, tmp_path, monkeypatch):
     rep = process_file(samples["netcdf4"][0], ReadOptions(), tmp_path, ai=True)
     data = json.loads(rep.json_path.read_text(encoding="utf-8"))
     assert data["ai"]["provider"] == "fake"
-    assert len(fake.calls[0]) < 30000 and "ONLY the computed summary" in fake.calls[0]
+    assert len(fake.calls[0]) < 30000 and "you never see the raw data" in fake.calls[0]
+    assert "statistics.t2m.mean = " in fake.calls[0]  # facts are offered for citation
 
 
 def test_ai_paper_map_reduce(monkeypatch):
     fake = FakeProvider()
     monkeypatch.setattr(ai, "CHUNK_TOKENS", 50)
     pages = ["word " * 120, "more " * 120, "end " * 120]
-    ai.summarize_paper(pages, "T", "ar", ai.AIClient(fake, verbose=False))
-    assert len(fake.calls) == 4  # 3 map steps + 1 reduce
+    ai.run_workflow(ai.paper_workflow(pages, "T", "ar"), ai.AIClient(fake, verbose=False))
+    assert len(fake.calls) == 4  # 3 map steps + 1 reduce (no review: reply was not JSON)
     assert "[page 2]" in fake.calls[1] and "Arabic" in fake.calls[-1]
 
 
