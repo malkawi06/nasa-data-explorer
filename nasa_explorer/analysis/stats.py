@@ -176,11 +176,17 @@ def trend(series: pd.Series, name: str, units: str = "") -> dict | None:
 
 
 MIN_SPAN_YEARS = 2.0  # below this, sub-monthly data cannot separate a trend from the seasons
+SKEWED = 3.0  # upper tail this many times longer than the lower one
 EXTREME_Z = 5.0  # robust z; lower values flag ordinary heavy-tailed noise
 
 
 def _extremes(idx: pd.DatetimeIndex, residuals: np.ndarray, top: int = 5) -> list[dict]:
-    """Periods far from normal after removing the annual cycle and the trend (robust z-score)."""
+    """Periods far from normal after removing the annual cycle and the trend (robust z-score).
+    Strongly right-skewed series (daily rain, fire power) are skipped: their big days are the
+    normal shape of the data, and a z-score would call every storm a 10σ anomaly."""
+    q05, q50, q95 = np.percentile(residuals, [5, 50, 95])
+    if q95 - q50 > SKEWED * max(q50 - q05, 1e-12):  # quantile skew: a few outliers do not move it
+        return []
     med = float(np.median(residuals))
     # MAD alone collapses for zero-inflated series (daily rain), turning every shower into 200σ
     scale = max(1.4826 * float(np.median(np.abs(residuals - med))), 0.5 * float(np.std(residuals)))

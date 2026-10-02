@@ -224,7 +224,11 @@ def kpi_tiles(rep: dict, L: dict) -> str:
         )
     elif kind == "tree":
         tiles.append(_tile(L["kpi_size"], f"{s.get('n_datasets', 0)} {L['datasets'].lower()}", ""))
-    if trends := a.get("trends"):
+    if (trends := a.get("trends")) and "short_record_years" in trends[0]:
+        tiles.append(
+            _tile(f"{L['trends']}: {trends[0]['variable']}", "—", L["too_short"], "kpi-warn")
+        )
+    elif trends:
         t = trends[0]
         sig = t.get("mk_p", 1) < 0.05
         arrow = ("↑" if t["slope_per_year"] > 0 else "↓") if sig else "→"
