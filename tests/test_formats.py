@@ -85,3 +85,10 @@ def test_corrupt_file_with_known_extension(tmp_path):
     bad.write_bytes(b"CDF\x01" + b"\xff" * 50)
     rep = process_file(bad, ReadOptions(), tmp_path / "r")
     assert rep.reader == "unknown" and rep.html_path.exists()
+
+
+def test_json_summary_is_strict_json(samples, tmp_path):
+    """No NaN/Infinity tokens: the website and other tools parse these files strictly."""
+    rep = process_file(samples["netcdf_packed"][0], ReadOptions(), tmp_path)
+    text = rep.json_path.read_text(encoding="utf-8")
+    json.loads(text, parse_constant=lambda c: (_ for _ in ()).throw(ValueError(c)))

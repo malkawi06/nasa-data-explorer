@@ -1,29 +1,9 @@
-// NASA Data Explorer - browser build. Python (Pyodide) runs nasa_explorer locally;
-// nothing is uploaded anywhere.
+// NASA Data Explorer - browser build. Python (Pyodide) runs nasa_explorer in a Web Worker
+// (worker.js); nothing is uploaded anywhere.
 import { PROVIDERS, complete, isReady, loadSettings, modelOf, saveSettings } from "./ai.js";
 
-const PYODIDE_VERSION = "314.0.7";
-const PYODIDE_URL = `https://cdn.jsdelivr.net/pyodide/v${PYODIDE_VERSION}/full/`;
 const MAX_MB = 600; // wasm32 memory is limited; larger files are better run with the CLI
-
-// Always-needed Pyodide packages and pure-Python wheels from PyPI.
-const CORE = {
-  pkgs: ["micropip", "numpy", "pandas", "xarray", "scipy", "matplotlib", "jinja2", "h5py", "cftime", "pillow", "xlrd", "requests"],
-  pip: ["pymannkendall", "h5netcdf", "openpyxl", "markdown"],
-};
-// Optional readers: module name used in the reader's `requires` -> what provides it.
-const MODULE_SOURCES = {
-  rasterio: { pkgs: ["rasterio", "pyproj"], pip: ["rioxarray"] },
-  rioxarray: { pkgs: ["rasterio", "pyproj"], pip: ["rioxarray"] },
-  geopandas: { pkgs: ["geopandas", "fiona", "shapely", "pyproj"], pip: [] },
-  astropy: { pkgs: ["astropy"], pip: [] },
-  pyarrow: { pkgs: ["pyarrow"], pip: [] },
-  zarr: { pkgs: ["zarr", "numcodecs"], pip: [] },
-  bs4: { pkgs: ["beautifulsoup4"], pip: [] },
-  docx: { pkgs: ["lxml"], pip: ["python-docx"] },
-  pypdf: { pkgs: [], pip: ["pypdf"] },
-};
-// Preload by extension so the first pass usually succeeds.
+// Preload optional libraries by extension so the first pass usually succeeds.
 const BY_EXT = {
   tif: ["rasterio"], tiff: ["rasterio"], cog: ["rasterio"], jp2: ["rasterio"], img: ["rasterio"],
   shp: ["geopandas"], geojson: ["geopandas"], kml: ["geopandas"], kmz: ["geopandas"], gpkg: ["geopandas"], gml: ["geopandas"], fgb: ["geopandas"],
@@ -31,53 +11,56 @@ const BY_EXT = {
   parquet: ["pyarrow"], pq: ["pyarrow"],
   html: ["bs4"], htm: ["bs4"], docx: ["docx"], pdf: ["pypdf"], zarr: ["zarr"],
 };
+const DESKTOP_ONLY = new Set(["grib", "hdf4", "pdf"]);
 
 const T = {
   en: {
-    loading: "Loading the Python runtime (first visit downloads ~40 MB)…",
-    installing: "Installing analysis libraries…",
+    loading: "Starting…",
+    pRuntime: "Downloading Python for your browser (~40 MB, first visit only)…",
+    pPackages: (x) => `Installing analysis libraries (${x.done + 1}/${x.total}): ${x.label}`,
+    pExtra: (x) => `Loading extra libraries: ${x.label}…`,
+    pAnalyse: (x) => `Analysing ${x.label} (${x.done + 1} of ${x.total})…`,
     ready: "Ready. Drop files to analyse them.",
+    queued: (n) => `${n} file(s) will be analysed as soon as Python is ready…`,
     failed: "Could not start Python in this browser: ",
-    working: (n) => `Analysing ${n} file(s)…`,
-    extra: (m) => `Loading extra libraries: ${m}…`,
     done: (n) => `Done: ${n} report(s).`,
     tooBig: (name) => `${name} is larger than ${MAX_MB} MB. Use the desktop CLI for big files.`,
     badBbox: "Bounding box must be four numbers: W,S,E,N",
-    reader: "Reader", kind: "Kind", browser: "In browser", category: "Category", extensions: "Extensions",
+    reader: "Reader", browser: "Where", category: "Category", extensions: "Extensions",
     yes: "browser", no: "desktop",
-    tabReport: "Report", tabAI: "🤖 AI analysis", tabAsk: "Ask this file",
     runAI: "Run AI analysis", rerunAI: "Run again",
-    aiIntro: "The AI reads only the computed summary and statistics (never your file). Every number it writes is checked against those statistics, or against the cited page for papers.",
     needKey: "Choose a provider and paste an API key in “AI settings” first (Gemini and Groq have free tiers).",
     aiStep: (x) => `${x.label}: sending ~${x.tokens.toLocaleString()} tokens to ${x.provider}…`,
     aiWait: (sec) => `Rate limited by the provider; retrying in ${sec}s…`,
     aiDone: (v) => `Done: ${v.verified || 0} verified, ${v.mismatch || 0} wrong, ${v.unsupported || 0} not verified.`,
     aiFailed: "AI failed: ",
-    askPlaceholder: "e.g. Which months are warmest? Is there a trend?", askSend: "Ask",
-    saved: "Saved.", keyNote: "Your key stays in this browser and is sent only to the provider you choose.",
+    askPlaceholder: "e.g. Which months are warmest? Is there a trend?",
+    saved: "Saved.",
     desktop: "This format (GRIB / HDF4) needs native libraries the browser lacks. Run: pip install \"nasa-data-explorer[grib,hdf4]\" then nasa-explore FILE",
+    analysing: "analysing…",
   },
   ar: {
     title: "مستكشف بيانات ناسا",
-    subtitle: "اسحب أي ملف بيانات أو ورقة علمية واحصل على تقرير خلال ثوانٍ. التحليل يعمل داخل متصفحك، فملفاتك لا تغادر جهازك.",
-    loading: "جارٍ تحميل بيئة Python (الزيارة الأولى تنزّل نحو 40 ميغابايت)…",
-    installing: "جارٍ تثبيت مكتبات التحليل…",
+    loading: "جارٍ البدء…",
+    pRuntime: "تنزيل Python للمتصفح (نحو 40 ميغابايت، في الزيارة الأولى فقط)…",
+    pPackages: (x) => `تثبيت مكتبات التحليل (${x.done + 1}/${x.total}): ${x.label}`,
+    pExtra: (x) => `تحميل مكتبات إضافية: ${x.label}…`,
+    pAnalyse: (x) => `تحليل ${x.label} (${x.done + 1} من ${x.total})…`,
     ready: "جاهز. اسحب الملفات لتحليلها.",
+    queued: (n) => `سيُحلَّل ${n} ملف حالما يجهز Python…`,
     failed: "تعذّر تشغيل Python في هذا المتصفح: ",
-    working: (n) => `جارٍ تحليل ${n} ملف…`,
-    extra: (m) => `تحميل مكتبات إضافية: ${m}…`,
     done: (n) => `تم: ${n} تقرير.`,
     tooBig: (name) => `${name} أكبر من ${MAX_MB} ميغابايت. استخدم نسخة سطر الأوامر للملفات الكبيرة.`,
     badBbox: "النطاق الجغرافي يجب أن يكون أربعة أرقام: W,S,E,N",
-    drop: "اسحب الملفات هنا أو انقر للاختيار",
-    dropHint: "NetCDF وHDF5 وGeoTIFF وShapefile (اختر كل أجزائه) وGeoJSON وFITS وCSV وExcel وJSON وParquet وPDF وDOCX والصور وZIP…",
+    drop: "اسحب الملفات أو انقر للاختيار",
+    dropHint: "تبقى ملفاتك على جهازك. اختر كل أجزاء Shapefile معاً.",
     options: "خيارات: المتغير، المنطقة، التواريخ",
     var: "المتغير / العمود", bbox: "النطاق W,S,E,N", start: "تاريخ البداية", end: "تاريخ النهاية",
     formats: "الصيغ المدعومة",
-    formatsHint: "تُحمَّل المكتبات الإضافية عند الحاجة أول مرة. الصيغ المعلّمة «سطح المكتب» تحتاج نسخة Python المثبّتة (انظر GitHub).",
+    formatsHint: "تُحمَّل المكتبات الإضافية عند الحاجة أول مرة. صيغ «سطح المكتب» تحتاج نسخة Python المثبّتة.",
     footer: "صُنع لتحدي ناسا Space Apps 2026 · غير تابع لناسا",
-    open: "فتح", html: "HTML", json: "JSON",
-    reader: "القارئ", kind: "النوع", browser: "في المتصفح", category: "الفئة", extensions: "الامتدادات",
+    open: "فتح في تبويب جديد", html: "HTML", json: "JSON",
+    reader: "القارئ", browser: "أين", category: "الفئة", extensions: "الامتدادات",
     yes: "المتصفح", no: "سطح المكتب",
     tabReport: "التقرير", tabAI: "🤖 تحليل الذكاء الاصطناعي", tabAsk: "اسأل الملف",
     runAI: "شغّل تحليل الذكاء الاصطناعي", rerunAI: "أعد التشغيل",
@@ -89,24 +72,72 @@ const T = {
     aiFailed: "فشل الذكاء الاصطناعي: ",
     askPlaceholder: "مثلاً: ما أدفأ الأشهر؟ هل يوجد اتجاه؟", askSend: "اسأل",
     saved: "تم الحفظ.", keyNote: "يبقى مفتاحك في هذا المتصفح ويُرسَل فقط إلى المزوّد الذي تختاره.",
-    aiSettings: "إعدادات الذكاء الاصطناعي", provider: "المزوّد", model: "النموذج (اختياري)", apiKey: "مفتاح API",
-    remember: "تذكّر المفتاح على هذا الجهاز", ollamaHost: "عنوان Ollama", save: "حفظ", getKey: "احصل على مفتاح",
+    aiSettings: "إعدادات الذكاء الاصطناعي (بمفتاحك الخاص)", provider: "المزوّد", model: "النموذج (اختياري)", apiKey: "مفتاح API",
+    remember: "تذكّر المفتاح على هذا الجهاز", ollamaHost: "عنوان Ollama", save: "حفظ", getKey: "احصل على مفتاح مجاني",
     desktop: "هذه الصيغة (GRIB / HDF4) تحتاج مكتبات غير متوفرة في المتصفح. شغّل: pip install \"nasa-data-explorer[grib,hdf4]\" ثم nasa-explore FILE",
+    heroTitle: "افهم أي ملف بيانات من ناسا خلال دقائق",
+    heroLead: "اسحب ملف NetCDF أو HDF5 أو GeoTIFF أو CSV أو FITS أو Shapefile أو ورقة PDF أو ملف ZIP يجمعها. ستحصل على خرائط واتجاهات وفحوصات جودة وملخص بلغة واضحة.",
+    f1t: "خصوصية", f1: "يعمل Python داخل متصفحك. لا يُرفع أي ملف.",
+    f2t: "أكثر من 30 صيغة", f2: "تُكتشف الصيغة من محتوى الملف نفسه، حتى لو كان الامتداد خاطئاً.",
+    f3t: "ذكاء اصطناعي مُدقَّق", f3: "ملخص اختياري يُفحص فيه كل رقم مقابل البيانات.",
+    analysing: "جارٍ التحليل…",
   },
 };
 
 const $ = (sel) => document.querySelector(sel);
-const state = { lang: "en", py: null, bridge: null, loaded: new Set(), busy: false, runs: 0, status: "loading", statusArg: null };
+const state = {
+  lang: "en", ready: false, busy: false, runs: 0, queue: [], formats: [],
+  results: new Map(), order: [], selected: null, status: ["loading"],
+};
 const t = (key, arg) => {
   const v = T[state.lang][key] ?? T.en[key];
   return typeof v === "function" ? v(arg) : v;
 };
+const esc = (s) => String(s).replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[c]);
 
-function setStatus(key, kind = "busy", arg = null, extra = "") {
-  state.status = key; state.statusArg = arg;
-  $("#status-dot").className = `dot ${kind}`;
-  $("#status-text").textContent = (key ? t(key, arg) : "") + extra;
+// ---------------------------------------------------------------- worker RPC + progress
+
+const worker = new Worker(new URL("./worker.js", import.meta.url), { type: "module" });
+const pending = new Map();
+let nextId = 0;
+const rpc = (fn, ...args) => new Promise((resolve, reject) => {
+  const id = ++nextId;
+  pending.set(id, { resolve, reject });
+  const transfer = fn === "analyse" ? args[1].map((f) => f.data) : [];
+  worker.postMessage({ id, fn, args }, transfer);
+});
+worker.onmessage = ({ data }) => {
+  if (data.type === "progress") return onProgress(data);
+  const p = pending.get(data.id);
+  pending.delete(data.id);
+  if (data.error !== undefined) p.reject(new Error(data.error));
+  else p.resolve(data.result);
+};
+worker.onerror = (e) => setStatus(["failed"], "error", e.message);
+
+let progressGen = 0;
+function setProgress(fraction) {
+  const gen = ++progressGen;
+  $("#progress").classList.toggle("indeterminate", fraction === null);
+  $("#progress-bar").style.width = fraction === null ? "" : `${Math.round(fraction * 100)}%`;
+  // hide the bar shortly after completion unless new progress arrived meanwhile
+  if (fraction === 1) setTimeout(() => { if (gen === progressGen) $("#progress-bar").style.width = "0"; }, 700);
 }
+
+function onProgress(p) {
+  if (p.phase === "runtime") { setStatus(["pRuntime"]); setProgress(null); }
+  if (p.phase === "packages") { setStatus(["pPackages", p]); setProgress(0.25 + 0.75 * (p.done / p.total)); }
+  if (p.phase === "extra") { setStatus(["pExtra", p]); setProgress(null); }
+  if (p.phase === "analyse") { setStatus(["pAnalyse", p]); setProgress(p.total ? p.done / p.total : null); }
+}
+
+function setStatus(key, kind = "busy", extra = "") {
+  state.status = key;
+  $("#status-dot").className = `dot ${kind}`;
+  $("#status-text").textContent = t(key[0], key[1]) + extra;
+}
+
+// ---------------------------------------------------------------- language
 
 function applyLang(lang) {
   state.lang = lang;
@@ -118,75 +149,162 @@ function applyLang(lang) {
     el.textContent = typeof v === "string" ? v : el.dataset.en;
   }
   for (const b of document.querySelectorAll(".lang button")) b.setAttribute("aria-pressed", String(b.dataset.lang === lang));
-  if (state.status && !$("#status-dot").classList.contains("error")) setStatus(state.status, $("#status-dot").classList[1], state.statusArg);
-  if (state.bridge) renderFormats();
+  $(".ask-input").placeholder = t("askPlaceholder");
+  const dot = $("#status-dot").classList;
+  if (!dot.contains("error")) setStatus(state.status, dot[1] || "busy");
+  renderFormats();
+  renderList();
+  if (state.selected) renderDetail();
 }
 
-async function install({ pkgs = [], pip = [] }) {
-  const newPkgs = pkgs.filter((p) => !state.loaded.has(p));
-  const newPip = pip.filter((p) => !state.loaded.has(p));
-  // PROJ must be loaded before GDAL-based packages (fiona, rasterio): the other order makes
-  // the first pyproj call kill the runtime ("null function or function signature mismatch").
-  if (newPkgs.some((p) => ["fiona", "rasterio", "geopandas"].includes(p)) && !state.loaded.has("pyproj")) {
-    await state.py.loadPackage(["pyproj"]);
-    state.loaded.add("pyproj");
-  }
-  if (newPkgs.length) await state.py.loadPackage(newPkgs);
-  if (newPip.length) await state.py.runPythonAsync(`import micropip\nawait micropip.install(${JSON.stringify(newPip)})`);
-  for (const p of [...newPkgs, ...newPip]) state.loaded.add(p);
-}
-
-async function provide(modules) {
-  const todo = modules.filter((m) => MODULE_SOURCES[m] && !state.loaded.has(`mod:${m}`));
-  if (!todo.length) return false;
-  setStatus("extra", "busy", todo.join(", "));
-  for (const m of todo) {
-    await install(MODULE_SOURCES[m]);
-    state.loaded.add(`mod:${m}`);
-  }
-  await state.py.runPythonAsync("import importlib; importlib.invalidate_caches()");
-  return true;
-}
+// ---------------------------------------------------------------- boot
 
 async function boot() {
   try {
-    const { loadPyodide } = await import(`${PYODIDE_URL}pyodide.mjs`);
-    state.py = await loadPyodide({ indexURL: PYODIDE_URL });
-    setStatus("installing");
-    await install(CORE);
-    const zip = await (await fetch("nasa_explorer.zip", { cache: "no-cache" })).arrayBuffer();
-    state.py.unpackArchive(zip, "zip", { extractDir: "/home/pyodide/app" });
-    await state.py.runPythonAsync(`
-import sys, warnings, matplotlib
-sys.path.insert(0, "/home/pyodide/app")
-warnings.filterwarnings("ignore")
-matplotlib.use("Agg")
-import bridge`);
-    state.bridge = state.py.pyimport("bridge");
+    state.formats = JSON.parse(await rpc("init"));
+    state.ready = true;
     renderFormats();
-    setStatus("ready", "ready");
-    $("#drop").classList.remove("disabled");
+    setProgress(1);
+    setStatus(["ready"], "ready");
+    if (state.queue.length) analyse(state.queue.splice(0));
   } catch (err) {
     console.error(err);
-    setStatus("failed", "error", null, String(err.message || err));
+    setProgress(0);
+    setStatus(["failed"], "error", String(err.message || err));
   }
 }
 
 function renderFormats() {
-  const rows = JSON.parse(state.bridge.formats());
-  const desktopOnly = new Set(["grib", "hdf4", "pdf"]);
+  if (!state.formats.length) return;
   const head = `<tr><th>${t("category")}</th><th>${t("reader")}</th><th>${t("extensions")}</th><th>${t("browser")}</th></tr>`;
-  const body = rows.map((r) => {
-    const ok = !desktopOnly.has(r.name);
+  const body = state.formats.map((r) => {
+    const ok = !DESKTOP_ONLY.has(r.name);
     return `<tr><td>${esc(r.category)}</td><td>${esc(r.name)}</td><td class="ext">${esc(r.extensions.join(" "))}</td>` +
       `<td><span class="tag ${ok ? "yes" : "no"}">${ok ? t("yes") : t("no")}</span></td></tr>`;
   }).join("");
   $("#formats").innerHTML = head + body;
 }
 
-function esc(s) {
-  return String(s).replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[c]);
+// ---------------------------------------------------------------- file list (master)
+
+function stateIcon(r) {
+  if (r.pending) return `<span class="spinner" aria-label="${esc(t("analysing"))}"></span>`;
+  if (r.error || r.kind === "binary") return `<span class="fi-state bad" aria-hidden="true">!</span>`;
+  if (r.issues) return `<span class="fi-state warn" title="${r.issues}" aria-hidden="true">⚠</span>`;
+  return `<span class="fi-state ok" aria-hidden="true">✓</span>`;
 }
+
+function renderList() {
+  const ul = $("#files");
+  ul.innerHTML = state.order.map((key) => {
+    const r = state.results.get(key);
+    const meta = r.pending ? t("analysing") : `${r.reader} · ${r.kind}${r.headline ? " · " + r.headline : ""}`;
+    return `<li><button type="button" class="file-item${r.pending ? " pending" : ""}" data-key="${esc(key)}"` +
+      ` aria-current="${key === state.selected}"${r.pending ? " disabled" : ""}>` +
+      `<span class="fi-name">${esc(r.file)}</span>${stateIcon(r)}<span class="fi-meta">${esc(meta)}</span></button></li>`;
+  }).join("");
+}
+
+$("#files").addEventListener("click", (e) => {
+  const btn = e.target.closest(".file-item");
+  if (btn && !btn.disabled) select(btn.dataset.key);
+});
+
+// ---------------------------------------------------------------- report rendering (detail)
+
+// Reports are complete HTML pages; render them in a shadow root so their styles stay
+// scoped while the page scrolls normally (sticky section bar, no iframe height hacks).
+function renderInto(host, html) {
+  const doc = new DOMParser().parseFromString(html, "text/html");
+  const css = [...doc.querySelectorAll("style")].map((s) => s.textContent).join("\n")
+    .replace(/:root/g, ":host").replace(/(^|[}\s])body\s*\{/g, "$1:host{display:block;");
+  const root = host.shadowRoot || host.attachShadow({ mode: "open" });
+  // the page header already shows the file name, so the report's own title is hidden here
+  root.innerHTML = `<style>${css}\n:host main{max-width:none;padding:0}\n.rep-head h1{display:none}` +
+    `\n.toc{top:calc(var(--top,54px) + 3px)}</style>` +
+    `<main dir="${doc.documentElement.dir || "ltr"}">${doc.querySelector("main")?.innerHTML || doc.body.innerHTML}</main>`;
+}
+
+function shadowAnchors(host) {
+  host.addEventListener("click", (e) => {
+    const a = e.composedPath().find((n) => n.tagName === "A");
+    const href = a?.getAttribute("href") || "";
+    if (!href.startsWith("#")) return;
+    e.preventDefault();
+    host.shadowRoot.getElementById(href.slice(1))?.scrollIntoView({ behavior: "smooth", block: "start" });
+  });
+}
+shadowAnchors($(".preview"));
+
+function select(key) {
+  state.selected = key;
+  renderList();
+  renderDetail();
+  selectTab("report");
+  if (window.matchMedia("(max-width: 900px)").matches) $("#detail").scrollIntoView({ behavior: "smooth" });
+}
+
+function renderDetail() {
+  const r = state.results.get(state.selected);
+  if (!r) return;
+  $("#empty").hidden = true;
+  $("#detail").hidden = false;
+  $("#detail .file").textContent = r.file;
+  $("#detail .meta").textContent = `${r.reader} · ${r.kind}`;
+  const desktopOnly = r.missing.some((m) => ["cfgrib", "pyhdf"].includes(m));
+  const err = $("#detail .err");
+  err.hidden = !(r.error || desktopOnly);
+  err.textContent = r.error || (desktopOnly ? t("desktop") : "");
+  $("#detail .tablist").hidden = Boolean(r.error || r.kind === "binary");
+  renderInto($(".preview"), r.html);
+  const aiHost = $(".ai-frame");
+  aiHost.hidden = !r.ai.panel;
+  if (r.ai.panel) renderInto(aiHost, r.ai.panel);
+  $(".ai-status").textContent = r.ai.status || "";
+  $(".run-ai").textContent = r.ai.panel ? t("rerunAI") : t("runAI");
+  $(".run-ai").disabled = Boolean(r.ai.running);
+  $(".chat-log").innerHTML = r.chat.map((c) => `<div class="qa"><p class="q">${esc(c.q)}</p><p class="a">${esc(c.a)}</p></div>`).join("");
+  $(".ask-status").textContent = "";
+}
+
+const tabs = [...document.querySelectorAll("[role=tab]")];
+function selectTab(name) {
+  for (const tab of tabs) {
+    const on = tab.dataset.tab === name;
+    tab.setAttribute("aria-selected", String(on));
+    tab.tabIndex = on ? 0 : -1;
+    document.querySelector(`[data-panel="${tab.dataset.tab}"]`).hidden = !on;
+  }
+}
+for (const tab of tabs) tab.addEventListener("click", () => selectTab(tab.dataset.tab));
+$(".tablist").addEventListener("keydown", (e) => {
+  const step = { ArrowRight: 1, ArrowLeft: -1 }[e.key] * (document.documentElement.dir === "rtl" ? -1 : 1);
+  if (!step) return;
+  const i = tabs.findIndex((x) => x.getAttribute("aria-selected") === "true");
+  const next = tabs[(i + step + tabs.length) % tabs.length];
+  selectTab(next.dataset.tab);
+  next.focus();
+});
+
+function download(name, text, type) {
+  const url = URL.createObjectURL(new Blob([text], { type }));
+  const a = Object.assign(document.createElement("a"), { href: url, download: name });
+  document.body.append(a);
+  a.click();
+  a.remove();
+  setTimeout(() => URL.revokeObjectURL(url), 1000);
+}
+const current = () => state.results.get(state.selected);
+const baseName = (r) => r.file.replace(/[^\w.-]+/g, "_");
+$(".open").onclick = () => {
+  const url = URL.createObjectURL(new Blob([current().html], { type: "text/html" }));
+  window.open(url, "_blank", "noopener");
+  setTimeout(() => URL.revokeObjectURL(url), 60000);
+};
+$(".dl-html").onclick = () => download(`${baseName(current())}.html`, current().html, "text/html");
+$(".dl-json").onclick = () => download(`${baseName(current())}.json`, current().json, "application/json");
+
+// ---------------------------------------------------------------- analysis
 
 function readOptions() {
   const bboxText = $("#opt-bbox").value.trim();
@@ -203,73 +321,78 @@ function readOptions() {
   return { var: $("#opt-var").value.trim(), bbox, start: $("#opt-start").value, end: $("#opt-end").value, lang: state.lang };
 }
 
-function download(name, text, type) {
-  const url = URL.createObjectURL(new Blob([text], { type }));
-  const a = Object.assign(document.createElement("a"), { href: url, download: name });
-  document.body.append(a);
-  a.click();
-  a.remove();
-  setTimeout(() => URL.revokeObjectURL(url), 1000);
-}
-
-function fitFrame(frame) {
-  frame.addEventListener("load", () => {
-    try { frame.style.height = `${frame.contentDocument.documentElement.scrollHeight + 8}px`; } catch { /* cross-origin */ }
-  });
-}
-
-function renderCard(r) {
-  const card = $("#card-tpl").content.firstElementChild.cloneNode(true);
-  for (const el of card.querySelectorAll("[data-i18n]")) el.textContent = t(el.dataset.i18n) ?? el.textContent;
-  card.querySelector(".file").textContent = r.file;
-  card.querySelector(".meta").textContent = `${r.reader} · ${r.kind}`;
-  card.querySelector(".headline").textContent = r.headline;
-  const desktopOnly = r.missing.some((m) => ["cfgrib", "pyhdf"].includes(m));
-  if (r.error || desktopOnly) {
-    const err = card.querySelector(".err");
-    err.hidden = false;
-    err.textContent = r.error || t("desktop");
+function enqueue(files) {
+  files = files.filter(Boolean);
+  if (!files.length) return;
+  const big = files.find((f) => f.size > MAX_MB * 1024 * 1024);
+  if (big) return setStatus(["tooBig", big.name], "error");
+  if (!state.ready || state.busy) {
+    state.queue.push(...files);
+    if (!state.ready) setStatus(["queued", state.queue.length]);
+    return;
   }
-  const base = r.file.replace(/[^\w.-]+/g, "_");
-  card.querySelector(".preview").srcdoc = r.html;
-  card.querySelector(".open").onclick = () => {
-    const url = URL.createObjectURL(new Blob([r.html], { type: "text/html" }));
-    window.open(url, "_blank", "noopener");
-    setTimeout(() => URL.revokeObjectURL(url), 60000);
-  };
-  card.querySelector(".dl-html").onclick = () => download(`${base}.html`, r.html, "text/html");
-  card.querySelector(".dl-json").onclick = () => download(`${base}.json`, r.json, "application/json");
-
-  // tabs: Report | AI analysis | Ask
-  const tabs = [...card.querySelectorAll("[role=tab]")];
-  const select = (name) => {
-    for (const tab of tabs) {
-      const on = tab.dataset.tab === name;
-      tab.setAttribute("aria-selected", String(on));
-      tab.tabIndex = on ? 0 : -1;
-      card.querySelector(`[data-panel="${tab.dataset.tab}"]`).hidden = !on;
-    }
-  };
-  for (const tab of tabs) tab.addEventListener("click", () => select(tab.dataset.tab));
-  card.querySelector(".tablist").addEventListener("keydown", (e) => {
-    const i = tabs.findIndex((x) => x.getAttribute("aria-selected") === "true");
-    const step = { ArrowRight: 1, ArrowLeft: -1 }[e.key] * (document.documentElement.dir === "rtl" ? -1 : 1);
-    if (!step) return;
-    const next = tabs[(i + step + tabs.length) % tabs.length];
-    select(next.dataset.tab);
-    next.focus();
-  });
-  if (r.error || r.kind === "binary") card.querySelector(".tablist").hidden = true;
-  card.querySelector(".ask-input").placeholder = t("askPlaceholder");
-  const aiFrame = card.querySelector(".ai-frame");
-  fitFrame(aiFrame);
-  card.querySelector(".run-ai").onclick = (e) => runAI(card, r, e.currentTarget);
-  card.querySelector(".ask-form").onsubmit = (e) => {
-    e.preventDefault();
-    askFile(card, r);
-  };
-  return card;
+  analyse(files);
 }
+
+async function analyse(files) {
+  const options = readOptions();
+  if (!options) return;
+  state.busy = true;
+  const run = `run${++state.runs}`;
+  const placeholder = `${run}/…`;
+  state.results.set(placeholder, { file: files.map((f) => f.name).join(", "), pending: true });
+  state.order.unshift(placeholder);
+  renderList();
+  try {
+    const exts = files.map((f) => f.name.split(".").pop().toLowerCase());
+    await rpc("provide", [...new Set(exts.flatMap((e) => BY_EXT[e] || []))]);
+    const payload = await Promise.all(files.map(async (f) => ({ name: f.name, data: await f.arrayBuffer() })));
+    const opts = JSON.stringify(options);
+    let results = JSON.parse(await rpc("analyse", run, payload, opts));
+    // a reader reported a missing optional library (format found by its bytes): load it and retry once
+    if (await rpc("provide", [...new Set(results.flatMap((r) => r.missing))])) {
+      const again = await Promise.all(files.map(async (f) => ({ name: f.name, data: await f.arrayBuffer() })));
+      results = JSON.parse(await rpc("analyse", run, again, opts));
+    }
+    state.results.delete(placeholder);
+    state.order = state.order.filter((k) => k !== placeholder);
+    for (const r of results.reverse()) {
+      const quality = JSON.parse(r.json).analysis?.quality || [];
+      r.issues = quality.filter((q) => q.level !== "info").length;
+      r.ai = {};
+      r.chat = [];
+      state.results.set(r.key, r);
+      state.order.unshift(r.key);
+    }
+    setProgress(1);
+    setStatus(["done", results.length], "ready");
+    select(results[results.length - 1].key);
+  } catch (err) {
+    console.error(err);
+    state.results.set(placeholder, { file: files.map((f) => f.name).join(", "), error: String(err.message || err),
+      kind: "binary", reader: "error", headline: "", missing: [], html: "", json: "{}", ai: {}, chat: [] });
+    renderList();
+    setProgress(0);
+    setStatus(["failed"], "error", String(err.message || err).split("\n").slice(-2).join(" "));
+  } finally {
+    state.busy = false;
+    if (state.queue.length) analyse(state.queue.splice(0));
+  }
+}
+
+const drop = $("#drop");
+$("#file-input").addEventListener("change", (e) => {
+  enqueue([...e.target.files]);
+  e.target.value = "";
+});
+for (const target of [drop, $("#view")]) {
+  for (const ev of ["dragenter", "dragover"]) target.addEventListener(ev, (e) => { e.preventDefault(); drop.classList.add("over"); });
+  for (const ev of ["dragleave", "drop"]) target.addEventListener(ev, (e) => { e.preventDefault(); drop.classList.remove("over"); });
+  target.addEventListener("drop", (e) => enqueue([...e.dataTransfer.files]));
+}
+for (const b of document.querySelectorAll(".lang button")) b.addEventListener("click", () => applyLang(b.dataset.lang));
+
+// ---------------------------------------------------------------- AI (bring your own key)
 
 function aiSettingsOrPrompt(statusEl) {
   const s = loadSettings();
@@ -282,60 +405,59 @@ function aiSettingsOrPrompt(statusEl) {
   return null;
 }
 
-async function drive(start, s, statusEl) {
-  let res = JSON.parse(start());
+async function drive(startFn, s, onStatus) {
+  let res = JSON.parse(await startFn());
   while (!res.done) {
-    statusEl.textContent = t("aiStep", { ...res.step, provider: PROVIDERS[s.provider].label });
-    const reply = await complete(s, res.step, (sec) => { statusEl.textContent = t("aiWait", sec); });
-    res = JSON.parse(state.bridge.ai_next(res.job, reply));
+    onStatus(t("aiStep", { ...res.step, provider: PROVIDERS[s.provider].label }));
+    const reply = await complete(s, res.step, (sec) => onStatus(t("aiWait", sec)));
+    res = JSON.parse(await rpc("ai_next", res.job, reply));
   }
   return res;
 }
 
-async function runAI(card, r, button) {
-  const statusEl = card.querySelector(".ai-status");
-  const s = aiSettingsOrPrompt(statusEl);
-  if (!s) return;
-  button.disabled = true;
+$(".run-ai").onclick = async () => {
+  const r = current();
+  const s = aiSettingsOrPrompt($(".ai-status"));
+  if (!s || !r) return;
+  const show = (msg) => { r.ai.status = msg; if (current() === r) $(".ai-status").textContent = msg; };
+  r.ai.running = true;
+  $(".run-ai").disabled = true;
   try {
-    const res = await drive(() => state.bridge.ai_start(r.key, state.lang, s.provider, modelOf(s)), s, statusEl);
+    const res = await drive(() => rpc("ai_start", r.key, state.lang, s.provider, modelOf(s)), s, show);
     r.html = res.html;
     r.json = res.json;
-    card.querySelector(".preview").srcdoc = r.html;
-    const frame = card.querySelector(".ai-frame");
-    frame.hidden = false;
-    frame.srcdoc = res.panel;
-    statusEl.textContent = t("aiDone", res.verification || {});
-    button.textContent = t("rerunAI");
+    r.ai.panel = res.panel;
+    show(t("aiDone", res.verification || {}));
   } catch (err) {
     console.error(err);
-    statusEl.textContent = t("aiFailed") + (err.message || err);
+    show(t("aiFailed") + (err.message || err));
   } finally {
-    button.disabled = false;
+    r.ai.running = false;
+    if (current() === r) renderDetail();
   }
-}
+};
 
-async function askFile(card, r) {
-  const input = card.querySelector(".ask-input");
-  const log = card.querySelector(".chat-log");
+$(".ask-form").onsubmit = async (e) => {
+  e.preventDefault();
+  const r = current();
+  const input = $(".ask-input");
   const question = input.value.trim();
-  const statusEl = card.querySelector(".ask-status");
-  if (!question) return;
-  const s = aiSettingsOrPrompt(statusEl);
+  if (!question || !r) return;
+  const s = aiSettingsOrPrompt($(".ask-status"));
   if (!s) return;
-  const item = document.createElement("div");
-  item.className = "qa";
-  item.innerHTML = `<p class="q">${esc(question)}</p><p class="a">…</p>`;
-  log.prepend(item);
+  const entry = { q: question, a: "…" };
+  r.chat.unshift(entry);
   input.value = "";
+  renderDetail();
   try {
-    const res = await drive(() => state.bridge.chat_start(r.key, question, state.lang), s, statusEl);
-    item.querySelector(".a").textContent = res.answer;
-    statusEl.textContent = "";
+    const res = await drive(() => rpc("chat_start", r.key, question, state.lang), s,
+      (msg) => { if (current() === r) $(".ask-status").textContent = msg; });
+    entry.a = res.answer;
   } catch (err) {
-    item.querySelector(".a").textContent = t("aiFailed") + (err.message || err);
+    entry.a = t("aiFailed") + (err.message || err);
   }
-}
+  if (current() === r) renderDetail();
+};
 
 function initSettings() {
   const s = loadSettings();
@@ -364,59 +486,8 @@ function initSettings() {
   });
 }
 
-async function analyse(files) {
-  if (state.busy || !state.bridge || !files.length) return;
-  const options = readOptions();
-  if (!options) return;
-  for (const f of files) {
-    if (f.size > MAX_MB * 1024 * 1024) {
-      setStatus("tooBig", "error", f.name);
-      return;
-    }
-  }
-  state.busy = true;
-  $("#drop").classList.add("disabled");
-  const pending = Object.assign(document.createElement("article"), { className: "card pending" });
-  pending.textContent = files.map((f) => f.name).join(", ");
-  $("#results").prepend(pending);
-  try {
-    const exts = files.map((f) => f.name.split(".").pop().toLowerCase());
-    await provide([...new Set(exts.flatMap((e) => BY_EXT[e] || []))]);
-    setStatus("working", "busy", files.length);
-    const dir = state.bridge.new_run(`run${++state.runs}`);
-    for (const f of files) state.py.FS.writeFile(`${dir}/${f.name}`, new Uint8Array(await f.arrayBuffer()));
-    const opts = JSON.stringify(options);
-    let results = JSON.parse(state.bridge.analyse_dir(dir, opts));
-    // A reader reported a missing optional library (e.g. a format detected by its bytes): load it and retry once.
-    if (await provide([...new Set(results.flatMap((r) => r.missing))])) {
-      setStatus("working", "busy", files.length);
-      results = JSON.parse(state.bridge.analyse_dir(dir, opts));
-    }
-    pending.replaceWith(...results.map(renderCard));
-    setStatus("done", "ready", results.length);
-  } catch (err) {
-    console.error(err);
-    pending.classList.remove("pending");
-    pending.innerHTML = `<p class="err">${esc(err.message || err)}</p>`;
-    setStatus("failed", "error", null, String(err.message || err).split("\n").slice(-2).join(" "));
-  } finally {
-    state.busy = false;
-    $("#drop").classList.remove("disabled");
-  }
-}
-
-const drop = $("#drop");
-drop.classList.add("disabled");
-$("#file-input").addEventListener("change", (e) => {
-  analyse([...e.target.files]);
-  e.target.value = "";
-});
-for (const ev of ["dragenter", "dragover"]) drop.addEventListener(ev, (e) => { e.preventDefault(); drop.classList.add("over"); });
-for (const ev of ["dragleave", "drop"]) drop.addEventListener(ev, (e) => { e.preventDefault(); drop.classList.remove("over"); });
-drop.addEventListener("drop", (e) => analyse([...e.dataTransfer.files]));
-for (const b of document.querySelectorAll(".lang button")) b.addEventListener("click", () => applyLang(b.dataset.lang));
-
 initSettings();
 applyLang(navigator.language?.startsWith("ar") ? "ar" : "en");
-setStatus("loading");
+setStatus(["loading"]);
+setProgress(null);
 boot();

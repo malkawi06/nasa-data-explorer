@@ -135,7 +135,7 @@ def render_quality(issues: list[dict] | None, lang: str) -> str:
     if not issues:
         return f"<h2>{_e(L['quality'])}</h2><div class='card'>✓ {_e(L['no_issues'])}</div>"
     lis = "".join(
-        f"<li><span class='lvl lvl-{q['level']}'>{LEVEL[q['level']]} {_e(L[q['level']])}</span> {_e(q['message'])}</li>"
+        f"<li><span class='lvl lvl-{q['level']}'>{LEVEL[q['level']]} {_e(L[q['level']])}</span> <bdi dir='ltr'>{_e(q['message'])}</bdi></li>"
         for q in issues
     )
     return f"<h2>{_e(L['quality'])}</h2><div class='card'><ul class='qlist'>{lis}</ul></div>"

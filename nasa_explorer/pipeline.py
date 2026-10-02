@@ -6,6 +6,7 @@ import json
 import logging
 import re
 import tempfile
+from collections.abc import Callable
 from dataclasses import dataclass, field
 from datetime import datetime
 from pathlib import Path
@@ -250,10 +251,12 @@ def process(
     out_dir: str | Path = "reports",
     ai: bool = False,
     reuse: bool = False,
+    on_file: Callable[[str, int, int], None] | None = None,
 ) -> list[FileReport]:
     """Process a file, archive or folder. Writes one report per file plus index.html.
 
-    reuse=True skips files whose report is newer than the file (used by --ask)."""
+    reuse=True skips files whose report is newer than the file (used by --ask).
+    on_file(label, index, total) is called before each file (progress for UIs)."""
     opts = opts or ReadOptions()
     path, out_dir = Path(path), Path(out_dir)
     if not path.exists():
@@ -276,17 +279,23 @@ def process(
                 return
             items = iter_inputs(dest) if members else []
             log.info("%s: %d files inside archive", label, len(items))
+            nonlocal total
+            total += len(items) - 1
             for m in items:
                 handle(m, f"{label}/{m.relative_to(dest)}", depth + 1)
             return
         log.info("processing %s", label)
+        if on_file:
+            on_file(label, len(reports), total)
         reports.append(process_file(p, opts, out_dir, label, ai, reuse))
 
     if path.is_dir() and not (is_zarr_dir(path) or path.suffix.lower() == ".zarr"):
-        for p in iter_inputs(path, out_dir):
-            handle(p, str(p.relative_to(path)))
+        inputs = [(p, str(p.relative_to(path))) for p in iter_inputs(path, out_dir)]
     else:
-        handle(path, path.name)
+        inputs = [(path, path.name)]
+    total = len(inputs)  # archives may add more; the count grows as they are opened
+    for p, label in inputs:
+        handle(p, label)
 
     # index every report in out_dir, so repeated runs accumulate instead of overwriting
     entries = []

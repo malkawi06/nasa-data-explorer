@@ -13,7 +13,7 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parent.parent
 WEB = ROOT / "web"
 DIST = WEB / "dist"
-STATIC = ("index.html", "app.js", "ai.js", "style.css")
+STATIC = ("index.html", "app.js", "ai.js", "worker.js", "style.css")
 
 
 def build() -> Path:

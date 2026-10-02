@@ -46,7 +46,8 @@ def test_formats_in_real_pyodide(samples, tmp_path):
     try:
         with pw.sync_playwright() as p:
             browser = p.chromium.launch(executable_path=chromium_path())
-            page = browser.new_page()
+            ctx = browser.new_context()
+            page = ctx.new_page()
             errors: list[str] = []
             page.on("pageerror", lambda e: errors.append(str(e)))
             page.goto(f"{server.url}/index.html")
@@ -56,7 +57,8 @@ def test_formats_in_real_pyodide(samples, tmp_path):
             page.set_input_files("#file-input", files)
             n_cards = sum(k in samples for k in EXPECTED) + (1 if shp else 0)
             page.wait_for_function(
-                f"document.querySelectorAll('.card .dl-json').length >= {n_cards}", timeout=600_000
+                f"document.querySelectorAll('.file-item:not(.pending)').length >= {n_cards}",
+                timeout=600_000,
             )
             cards = page.eval_on_selector_all(
                 ".card",

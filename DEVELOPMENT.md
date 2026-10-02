@@ -26,9 +26,13 @@ Generic "drop any NASA/scientific file in, get a report" tool for Space Apps hac
 - `qa.py`: retrieval (sentence-transformers or TF-IDF).
 - `evals/`: AI eval cases with known truths (`python -m evals.run --provider X`).
   `tests/e2e/`: browser tests. The harness stubs Pyodide and proxies bridge calls to CPython.
-- `web/`: Netlify static site; Pyodide runs the package in-browser. `bridge.py` is the only
-  JS↔Python surface (JSON strings in and out). `build.py` zips the package into `web/dist/`.
-  The Pyodide version and package lists live at the top of `app.js`.
+- `web/`: the Netlify static site.
+  - Pyodide runs in a Web Worker (`worker.js`), so the page never freezes. `app.js` is the UI:
+    a file list on the side and the selected report in the main area. The report is rendered into
+    a shadow root, so its CSS stays scoped and the page scrolls normally.
+  - `bridge.py` is the only JS↔Python surface (JSON strings in and out). `build.py` zips the
+    package into `web/dist/`.
+  - The Pyodide version, the package batches and `MODULE_SOURCES` live at the top of `worker.js`.
 
 ## Gotchas
 - **eccodes vs GDAL/cartopy**: always call `_native.preload_before_eccodes()` before importing
@@ -47,7 +51,11 @@ Generic "drop any NASA/scientific file in, get a report" tool for Space Apps hac
   Verify browser changes on real Pyodide with `E2E_PYODIDE=1`, not only the stubbed UI test.
 - The browser build has no pyogrio, pymupdf, eccodes or pyhdf. Readers must keep heavy imports
   inside the function and declare them in `requires`, so the registry disables them cleanly.
-  The page then loads the missing modules on demand and retries (`MODULE_SOURCES` in `app.js`).
+  The page then loads the missing modules on demand and retries (`MODULE_SOURCES` in `worker.js`).
+- JSON output must be strict, with no NaN or Infinity (`report.dumps` turns them into null).
+  Browsers' `JSON.parse` rejects them.
+- Playwright: use `context.route`, not `page.route`, or requests made from the worker are not
+  intercepted.
 - Always pass `encoding="utf-8"` to file reads and writes: reports contain → × and Arabic, and
   Windows defaults to cp1252.
 - The AI cache key includes the provider *model* name. Scripted FakeProvider runs in one test

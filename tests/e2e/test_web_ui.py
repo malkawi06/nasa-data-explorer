@@ -28,10 +28,11 @@ def page(tmp_path):
         except Exception as exc:
             server.close()
             pytest.skip(f"no Chromium available: {exc}")
-        pg = browser.new_page(viewport={"width": 1100, "height": 900})
+        ctx = browser.new_context(viewport={"width": 1100, "height": 900})
+        pg = ctx.new_page()
         errors: list[str] = []
         pg.on("pageerror", lambda e: errors.append(str(e)))
-        pg.route(
+        ctx.route(  # context-level so requests from the Web Worker are intercepted too
             "https://cdn.jsdelivr.net/**",
             lambda r: r.fulfill(status=200, content_type="text/javascript", body=STUB),
         )
@@ -43,17 +44,24 @@ def page(tmp_path):
     server.close()
 
 
+def _report_text(page) -> str:
+    return page.evaluate("document.querySelector('.preview').shadowRoot?.innerHTML || ''")
+
+
 def test_upload_ai_and_chat(page, samples):
     page.set_input_files("#file-input", [str(samples["netcdf4"][0]), str(samples["pdf"][0])])
-    page.wait_for_selector(".card .dl-json", timeout=60000)
-    assert page.locator(".card").count() == 2
-    card = page.locator(".card", has_text="grid.nc")
+    page.wait_for_selector(".file-item:not(.pending)", timeout=60000)
+    assert page.locator(".file-item").count() == 2
+    assert page.locator("#detail").is_visible() and "kpis" in _report_text(page)
+    page.locator(".file-item", has_text="paper.pdf").click()
+    assert page.locator("#detail .file").inner_text() == "paper.pdf"
+    page.locator(".file-item", has_text="grid.nc").click()
 
     # without a key, running AI opens the settings panel instead of failing
-    card.get_by_role("tab", name="AI analysis").click()
-    card.locator(".run-ai").click()
+    page.get_by_role("tab", name="AI analysis").click()
+    page.locator(".run-ai").click()
     assert page.locator("#ai-settings").get_attribute("open") is not None
-    assert "API key" in card.locator(".ai-status").inner_text()
+    assert "API key" in page.locator(".ai-status").inner_text()
 
     page.select_option("#ai-provider", "gemini")
     page.fill("#ai-key", "test-key-1234567890")
@@ -85,32 +93,36 @@ def test_upload_ai_and_chat(page, samples):
         }
         return route.fulfill(json=_gemini_reply(json.dumps(fixed)))
 
-    page.route(GEMINI, gemini)
-    card.locator(".run-ai").click()
-    page.wait_for_function("document.querySelector('.card .ai-frame:not([hidden])')", timeout=30000)
-    status = card.locator(".ai-status").inner_text()
+    page.context.route(GEMINI, gemini)
+    page.locator(".run-ai").click()
+    page.wait_for_selector(".ai-frame:not([hidden])", timeout=30000)
+    status = page.locator(".ai-status").inner_text()
     assert status.startswith("Done: 1 verified"), status
     assert calls[0]["key"] == "test-key-1234567890"
     assert calls[1]["body"]["generationConfig"]["responseMimeType"] == "application/json"
     assert len(calls) == 3  # 429 retried, then draft, then review
-    panel = card.locator(".ai-frame").get_attribute("srcdoc")
+    panel = page.evaluate("document.querySelector('.ai-frame').shadowRoot.innerHTML")
     assert "b-verified" in panel and "Synthetic grid" in panel
-    assert "ai-panel" in card.locator(".preview").get_attribute("srcdoc")  # report updated too
+    page.get_by_role("tab", name="Report").click()
+    assert "ai-panel" in _report_text(page) and "Synthetic grid" in _report_text(
+        page
+    )  # report updated too
 
-    card.get_by_role("tab", name="Ask this file").click()
-    card.locator(".ask-input").fill("What is the mean temperature?")
-    card.locator(".ask-form button").click()
+    page.get_by_role("tab", name="Ask this file").click()
+    page.locator(".ask-input").fill("What is the mean temperature?")
+    page.locator(".ask-form button").click()
     page.wait_for_function(
         "document.querySelector('.qa .a')?.textContent.includes('statistics')", timeout=20000
     )
     assert not page.errors
 
 
-def test_arabic_and_mobile(page, samples):
+def test_arabic_mobile_and_queue_before_ready(page, samples):
     page.set_viewport_size({"width": 390, "height": 900})
     page.click("button[data-lang=ar]")
     page.set_input_files("#file-input", [str(samples["csv"][0])])
-    page.wait_for_selector(".card .dl-json", timeout=60000)
+    page.wait_for_selector(".file-item:not(.pending)", timeout=60000)
     assert page.evaluate("document.documentElement.dir") == "rtl"
     assert page.evaluate("document.documentElement.scrollWidth <= innerWidth")
-    assert "تحليل الذكاء الاصطناعي" in page.locator(".card [data-tab=ai]").inner_text()
+    assert "تحليل الذكاء الاصطناعي" in page.locator("[data-tab=ai]").inner_text()
+    assert 'dir="rtl"' in _report_text(page)

@@ -56,7 +56,7 @@ def new_run(run: str) -> str:
     return str(src)
 
 
-def analyse_dir(src_dir: str, options: str = "{}") -> str:
+def analyse_dir(src_dir: str, options: str = "{}", progress=None) -> str:
     """Process every dropped file together (so .shp sidecars and archives work) and
     return one payload per report: metadata plus the full HTML and JSON."""
     opts = json.loads(options)
@@ -71,7 +71,12 @@ def analyse_dir(src_dir: str, options: str = "{}") -> str:
     out_dir = WORK / "out" / Path(src_dir).name
     shutil.rmtree(out_dir, ignore_errors=True)
     results = []
-    for rep in process(src_dir, read_opts, out_dir):
+
+    def on_file(label: str, i: int, n: int) -> None:
+        if progress is not None:
+            progress(label, i, n)
+
+    for rep in process(src_dir, read_opts, out_dir, on_file=on_file):
         payload = json.loads(rep.json_path.read_text(encoding="utf-8"))
         key = f"{Path(src_dir).name}/{rep.file}"
         _REPORTS[key] = (rep, payload, read_opts)
