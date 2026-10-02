@@ -48,7 +48,7 @@ h3{font-size:14px;margin:16px 0 6px;color:var(--ink2)}
 table{border-collapse:collapse;width:100%;font-size:12.5px;font-variant-numeric:tabular-nums}
 th,td{border-bottom:1px solid var(--line);padding:4px 8px;text-align:start;vertical-align:top}
 th{color:var(--ink2);font-weight:600;background:transparent}
-td.num{text-align:end}
+td.num,th.num{text-align:end}
 img.plot{max-width:100%;border-radius:6px;border:1px solid var(--line)}
 .swatch{display:inline-block;width:11px;height:11px;border-radius:3px;border:1px solid var(--line);vertical-align:-1px;margin-inline-end:5px}
 .notes li{color:var(--ink2)}.pill{display:inline-block;padding:1px 8px;border-radius:10px;border:1px solid var(--line);font-size:12px;color:var(--ink2);margin:2px}
@@ -97,7 +97,13 @@ def to_html(obj: Any, depth: int = 0) -> str:
             cols: list[str] = []
             for x in obj:
                 cols += [k for k in x if k not in cols]
-            head = "".join(f"<th>{html.escape(str(c))}</th>" for c in cols)
+            numeric = {
+                c for c in cols if all(isinstance(x.get(c), int | float) for x in obj if c in x)
+            }
+            head = "".join(
+                f"<th class='{'num' if c in numeric else ''}'>{html.escape(str(c))}</th>"
+                for c in cols
+            )
             body = "".join(
                 "<tr>"
                 + "".join(
@@ -122,7 +128,7 @@ def stats_table(stats: dict) -> str:
     if not stats:
         return ""
     keys = ["count", "missing_pct", "min", "p5", "p25", "p50", "mean", "p75", "p95", "max", "std"]
-    head = "<th></th>" + "".join(f"<th>{k}</th>" for k in keys)
+    head = "<th></th>" + "".join(f"<th class='num'>{k}</th>" for k in keys)
     rows = "".join(
         f"<tr><th>{html.escape(name)}</th>"
         + "".join(f"<td class='num'>{fmt(s.get(k, ''))}</td>" for k in keys)

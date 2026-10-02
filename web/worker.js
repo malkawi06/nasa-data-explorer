@@ -13,7 +13,7 @@ const CORE_BATCHES = [
   ["matplotlib", "pillow"],
   ["jinja2", "xlrd"],
 ];
-const CORE_PIP = ["pymannkendall", "h5netcdf", "openpyxl", "markdown"];
+const CORE_PIP = ["pymannkendall", "h5netcdf", "openpyxl", "markdown", "arabic-reshaper"];
 
 // Optional readers: module name in a reader's `requires` -> what provides it.
 const MODULE_SOURCES = {

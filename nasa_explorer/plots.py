@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import io
+import re
 import warnings
 
 import matplotlib
@@ -12,6 +13,39 @@ import matplotlib.pyplot as plt  # noqa: E402
 import numpy as np  # noqa: E402
 import pandas as pd  # noqa: E402
 from matplotlib.colors import LinearSegmentedColormap  # noqa: E402
+from matplotlib.text import Text  # noqa: E402
+
+# matplotlib before 3.11 draws text left to right without Arabic letter joining, so "درجة" comes out as
+# separate, reversed letters. Shape the letters and put right-to-left runs in visual order.
+RTL_RUN = re.compile(
+    r"[\u0590-\u08ff\ufb1d-\ufdff\ufe70-\ufeff]+(?:[\s_\-]+[\u0590-\u08ff\ufb1d-\ufdff\ufe70-\ufeff]+)*"
+)
+
+
+def rtl(text: str) -> str:
+    """Visual-order text for labels that contain Arabic (unchanged otherwise)."""
+    if not RTL_RUN.search(text):
+        return text
+    try:
+        import arabic_reshaper
+
+        text = arabic_reshaper.reshape(text)
+    except ImportError:
+        pass
+    runs = re.split(f"({RTL_RUN.pattern})", text)  # odd items are right-to-left runs
+    flipped = [r[::-1] if i % 2 else r for i, r in enumerate(runs)]
+    mostly_rtl = sum(len(r) for r in runs[1::2]) * 2 >= len(text.strip())
+    return "".join(reversed(flipped) if mostly_rtl else flipped)
+
+
+if tuple(int(v) for v in re.findall(r"\d+", matplotlib.__version__)[:2]) < (3, 11):
+    # 3.11+ lays out Arabic itself (libraqm); older builds, as in Pyodide, need the help
+    _set_text = Text.set_text
+
+    def _set_rtl_text(self, s):
+        return _set_text(self, rtl(s) if isinstance(s, str) else s)
+
+    Text.set_text = _set_rtl_text
 
 # Validated categorical order (CVD-safe); assigned in order, never cycled.
 SERIES = ["#2a78d6", "#eb6834", "#1baf7a", "#eda100", "#e87ba4", "#008300", "#4a3aa7", "#e34948"]
@@ -355,13 +389,18 @@ def color_histogram(arr: np.ndarray, bands: list[str], title: str) -> bytes:
     flat = arr.reshape(-1, arr.shape[-1])
     if flat.shape[0] > 2_000_000:
         flat = flat[:: flat.shape[0] // 2_000_000 + 1]
-    hi = 255 if arr.dtype == np.uint8 else float(np.nanmax(flat)) or 1.0
+    if arr.dtype == np.uint8:
+        lo, hi = 0.0, 255.0
+    else:  # 16-bit / float: a few saturated pixels would squash everything into one bin
+        lo, hi = (float(v) for v in np.nanpercentile(flat[:, : len(bands)], [0.1, 99.9]))
+        hi = hi if hi > lo else lo + 1.0
     for i, band in enumerate(bands):
-        counts, edges = np.histogram(flat[:, i], bins=64, range=(0, hi))
+        counts, edges = np.histogram(flat[:, i], bins=64, range=(lo, hi))
         ax.plot(edges[:-1], counts, color=named.get(band, SERIES[i % len(SERIES)]), label=band)
+    ax.set_yscale("log" if counts.max() > 50 * max(1, np.median(counts)) else "linear")
     if len(bands) > 1:
         ax.legend(frameon=False, labelcolor=INK_2)
-    ax.set_xlabel("pixel value")
+    ax.set_xlabel("pixel value" + ("" if arr.dtype == np.uint8 else " (0.1-99.9 percentile range)"))
     ax.set_ylabel("pixels")
     ax.set_title(title)
     return _png(fig)

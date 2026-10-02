@@ -27,6 +27,7 @@ dependencies = [
   "pillow>=10",
   "python-dotenv>=1.0",
   "requests>=2.31",
+  "arabic-reshaper>=3.0",
 ]
 
 [project.optional-dependencies]
