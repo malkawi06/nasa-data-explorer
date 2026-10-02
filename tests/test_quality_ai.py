@@ -102,6 +102,18 @@ def test_products():
     firms = {"summary": {"columns": [{"name": "latitude"}, {"name": "longitude"}, {"name": "frp"}]}}
     assert identify("anything.csv", firms)[0]["key"] == "firms"
     assert identify("random.nc", {}) == []
+    planetary_ids = {  # official product names, as downloaded from the PDS
+        "ESP_011605_1170_RED.JP2": "hirise",
+        "DTEEC_002118_1510_003608_1510_A01.IMG": "hirise",
+        "B01_009861_1753_XI_04S352W.IMG": "ctx",
+        "M1105555625LE.IMG": "lroc",
+        "megt90n000eb.img": "mola",
+        "frt00003e12_07_if166l_trr3.img": "crism",
+        "h0905_0000_da4.img": "hrsc",
+    }
+    for name, key in planetary_ids.items():
+        assert key in [c["key"] for c in identify(name, {})], name
+    assert identify("image_001234_5678.png", {}) == identify("h2020_0101.csv", {}) == []
 
 
 def test_report_has_quality_trend_map_and_ai_placeholder(samples, tmp_path):

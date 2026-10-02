@@ -21,6 +21,8 @@ SIGNATURES = {
     b"%PDF": "PDF",
     b"\x89PNG": "PNG",
     b"\xff\xd8\xff": "JPEG",
+    b"\x00\x00\x00\x0cjP  \r\n\x87\n": "JPEG 2000",
+    b"\xffO\xffQ": "JPEG 2000",  # bare codestream (.j2k / .j2c)
     b"II*\x00": "TIFF",
     b"MM\x00*": "TIFF",
     b"PAR1": "Parquet",

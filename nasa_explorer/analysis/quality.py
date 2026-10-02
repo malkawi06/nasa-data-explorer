@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import re
 
+from ..core import IN_BROWSER
 from .stats import span_text
 
 FILL_LIKE = (-9999.0, -999.0, -999.9, -99999.0, -32767.0, -32768.0, 65535.0, 32767.0)
@@ -280,6 +281,17 @@ def unreadable(size: int, signature: str, problems: list[str]) -> list[dict]:
     """Why a file ended up as 'unknown': empty, or a known format that failed to open."""
     if size == 0:
         return [_issue("error", "empty_file", None, "the file is empty (0 bytes)")]
+    if signature == "JPEG 2000" and IN_BROWSER:  # neither GDAL nor Pillow here decodes it
+        return [
+            _issue(
+                "error",
+                "unsupported_in_browser",
+                None,
+                "JPEG 2000 (HiRISE, LROC, Sentinel-2 ...) cannot be decoded in the browser. Run "
+                "the command-line tool on it, or convert it first: "
+                "gdal_translate -of GTiff -co COMPRESS=DEFLATE in.jp2 out.tif",
+            )
+        ]
     if problems and signature not in ("", "unrecognised"):
         first = problems[0].split("\n")[0][:220]
         return [

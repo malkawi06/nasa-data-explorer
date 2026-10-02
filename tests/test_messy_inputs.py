@@ -181,3 +181,16 @@ def test_exactly_linear_series_is_a_significant_trend(tmp_path):
     pd.DataFrame({"date": days, "count": range(800)}).to_csv(tmp_path / "c.csv", index=False)
     t = _run(tmp_path / "c.csv", tmp_path).analysis["trends"][0]
     assert t["mk_trend"] == "increasing" and t["mk_p"] < 0.001
+
+
+def test_jpeg2000_is_named_and_explained_in_the_browser(monkeypatch):
+    from nasa_explorer.analysis import quality
+    from nasa_explorer.readers.unknown import detect_signature
+
+    assert (
+        detect_signature(b"\x00\x00\x00\x0cjP  \r\n\x87\n\x00\x00\x00\x14ftypjp2 ") == "JPEG 2000"
+    )
+    assert detect_signature(b"\xffO\xffQ\x00\x2f") == "JPEG 2000"
+    monkeypatch.setattr(quality, "IN_BROWSER", True)
+    (issue,) = quality.unreadable(5000, "JPEG 2000", ["GDAL: not a supported format"])
+    assert issue["code"] == "unsupported_in_browser" and "gdal_translate" in issue["message"]

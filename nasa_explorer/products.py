@@ -265,7 +265,8 @@ CATALOG: tuple[Product, ...] = (
     Product(
         "lroc",
         "LRO Camera (NAC / WAC) images and mosaics",
-        r"lroc|(?<![a-z])(nac|wac)(?![a-z])|lunar.?reconnaissance.?orbiter.?camera",
+        r"lroc|(?<![a-z])(nac|wac)(?![a-z])|lunar.?reconnaissance.?orbiter.?camera"
+        r"|(?<![a-z0-9])m\d{9,10}(le|re|lc|rc|me|ce)(?![a-z0-9])",  # M1105555625LE
         resolution="NAC ~0.5 m/pixel; WAC ~100 m/pixel",
         caveats=(
             "Illumination changes with every image; near the poles long shadows hide much of the ground.",
@@ -277,7 +278,7 @@ CATALOG: tuple[Product, ...] = (
     Product(
         "mola",
         "MGS MOLA Mars topography (MEGDR)",
-        r"(?<![a-z])(mola|megdr|mars.?orbiter.?laser)",
+        r"(?<![a-z])(mola|megdr|mars.?orbiter.?laser)|(?<![a-z0-9])meg[tracs]\d{2}[ns]\d{3}[a-z]{2}",
         resolution="global grid up to 128 pixels/degree (~463 m)",
         caveats=(
             "Heights are relative to the Mars areoid (equipotential surface); Mars has no sea level.",
@@ -290,7 +291,7 @@ CATALOG: tuple[Product, ...] = (
     Product(
         "hirise",
         "MRO HiRISE images and DTMs",
-        r"hirise|(?<![a-z])dtee[ce]?_",
+        r"hirise|(?<![a-z])dte[ep][ce]?_|(?<![a-z0-9])(psp|esp|aeb|ptf)_\d{6}_\d{4}",
         resolution="images 25-50 cm/pixel; DTMs ~1-2 m posting",
         caveats=(
             "DTMs cover only small stereo footprints (a few km wide).",
@@ -302,7 +303,8 @@ CATALOG: tuple[Product, ...] = (
     Product(
         "ctx",
         "MRO Context Camera (CTX)",
-        r"(?<![a-z])ctx(?![a-z])|context.?camera",
+        r"(?<![a-z])ctx(?![a-z])|context.?camera"
+        r"|(?<![a-z0-9])[a-z]\d{2}_\d{6}_\d{4}_x[a-z]_\d{2}[ns]\d{3}w",  # B01_009861_1753_XI_04S352W
         resolution="~6 m/pixel",
         caveats=("Single images are not elevation; slopes need a stereo-derived DTM.",),
         search="MRO CTX",
@@ -321,7 +323,7 @@ CATALOG: tuple[Product, ...] = (
     Product(
         "crism",
         "MRO CRISM spectral / mineral maps",
-        r"crism",
+        r"crism|(?<![a-z0-9])(frt|hrl|hrs|frs|fft|msp|hsp)[0-9a-f]{8}",
         resolution="~18-36 m/pixel (targeted), ~100-200 m (mapping)",
         caveats=(
             "Summary parameters (e.g. D2300, OLINDEX) indicate minerals; they are not abundances.",
@@ -332,7 +334,7 @@ CATALOG: tuple[Product, ...] = (
     Product(
         "hrsc",
         "Mars Express HRSC DTMs and mosaics (ESA)",
-        r"(?<![a-z])hrsc(?![a-z])",
+        r"(?<![a-z])hrsc(?![a-z])|(?<![a-z0-9])h\d{4}_\d{4}_(nd|da|dt|s1|s2|p1|p2|re|gr|bl|ir)",
         resolution="DTMs ~50-200 m; images ~12.5 m/pixel",
         caveats=("Heights are relative to the Mars areoid, like MOLA.",),
         search="HRSC",
