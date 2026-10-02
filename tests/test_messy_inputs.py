@@ -162,3 +162,22 @@ def test_zero_inflated_rain_does_not_produce_absurd_sigmas(tmp_path):
     rep = _run(tmp_path / "rain.csv", tmp_path)
     zs = [abs(e["z"]) for t in rep.analysis["trends"] for e in t.get("extremes", [])]
     assert all(z < 30 for z in zs)
+
+
+def test_csv_with_a_blank_line_after_every_row(tmp_path):
+    # CSV text re-written in text mode on Windows ends every row with \r\r\n
+    days = pd.date_range("2018-01-01", periods=400).strftime("%d/%m/%Y")
+    text = "# station 7\r\nDatum;Temp\r\n" + "".join(
+        f"{d};{i % 17},5\r\n" for i, d in enumerate(days)
+    )
+    (tmp_path / "w.csv").write_bytes(text.replace("\r\n", "\r\r\n").encode())
+    rep = _run(tmp_path / "w.csv", tmp_path)
+    assert rep.analysis["summary"]["n_rows"] == 400
+    assert rep.analysis["coverage"]["time"]["column"] == "Datum"
+
+
+def test_exactly_linear_series_is_a_significant_trend(tmp_path):
+    days = pd.date_range("2020-01-01", periods=800)
+    pd.DataFrame({"date": days, "count": range(800)}).to_csv(tmp_path / "c.csv", index=False)
+    t = _run(tmp_path / "c.csv", tmp_path).analysis["trends"][0]
+    assert t["mk_trend"] == "increasing" and t["mk_p"] < 0.001

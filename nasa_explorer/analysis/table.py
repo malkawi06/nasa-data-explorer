@@ -64,7 +64,7 @@ def _parse_dates(s: pd.Series) -> pd.Series | None:
 
 
 def _has_tz(sample: pd.Series) -> bool:
-    return bool(sample.str.contains(r"(Z|[+-]\d{2}:?\d{2})$").any())
+    return bool(sample.str.contains(r"(?:Z|[+-]\d{2}:?\d{2})$").any())
 
 
 def _date_like_values(s: pd.Series) -> bool:

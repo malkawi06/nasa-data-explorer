@@ -151,10 +151,11 @@ def trend(series: pd.Series, name: str, units: str = "") -> dict | None:
         if seasonal and monthly and _complete_months(s):
             res, method = mk.seasonal_test(y, period=12), "Seasonal Mann-Kendall"
         elif autocorrelated and len(s) >= 10:
-            res, method = (
-                mk.hamed_rao_modification_test(anomalies),
-                "Hamed-Rao modified Mann-Kendall",
-            )
+            with np.errstate(invalid="ignore", divide="ignore"):
+                res = mk.hamed_rao_modification_test(anomalies)
+            method = "Hamed-Rao modified Mann-Kendall"
+            if not np.isfinite(res.p):  # an exact straight line leaves no residual to correct
+                res, method = mk.original_test(anomalies), "Mann-Kendall"
         else:
             res, method = mk.original_test(anomalies), "Mann-Kendall"
         if seasonal and method != "Seasonal Mann-Kendall":

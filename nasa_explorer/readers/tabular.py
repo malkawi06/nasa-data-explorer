@@ -31,15 +31,18 @@ def _fields(line: str, delim: str | None) -> int:
 
 
 def _start_for(lines: list[str], delim: str | None, need: int) -> int | None:
-    for start in range(0, max(1, min(len(lines) - need + 1, 120))):
-        block = lines[start : start + need]
-        if any(not ln.strip() or ln.lstrip().startswith("#") for ln in block):
+    # Blank lines do not break a table: files saved as \r\r\n (CSV text re-written on
+    # Windows) have one after every row. The returned index counts them, as skiprows does.
+    rows = [i for i, ln in enumerate(lines) if ln.strip()]
+    for k in range(0, max(1, min(len(rows) - need + 1, 120))):
+        block = [lines[i] for i in rows[k : k + need]]
+        if any(ln.lstrip().startswith("#") for ln in block):
             continue
         counts = {_fields(ln, delim) for ln in block}
         if len(counts) == 1 and counts.pop() > 1:
             if delim is None and not _numeric_share(block[1:]):
                 return None  # prose also splits on whitespace; demand numbers
-            return start
+            return rows[k]
     return None
 
 
@@ -56,7 +59,7 @@ def _find_table_start(lines: list[str]) -> tuple[int, str | None] | None:
         return start, delim
     if (start := _start_for(lines, None, need)) is not None:
         return start, None
-    body = [ln.strip() for ln in lines[1 : need + 1]]
+    body = [t for ln in lines[1 : need + 1] if (t := ln.strip())]
     if len(body) >= 2 and all(_NUMBER.fullmatch(t) for t in body):
         return 0, ","  # a single column of numbers under a header
     return None
@@ -90,7 +93,12 @@ def read_delimited(path: Path, opts: ReadOptions) -> ReadResult:
     start, delim = found
     sep = r"\s+" if delim is None else delim
     kw = {"engine": "python"} if delim is None else {"engine": "c", "low_memory": False}
-    body = [t for ln in lines[start + 1 :] for t in (ln.split(delim) if delim else ln.split())]
+    body = [
+        t
+        for ln in lines[start + 1 :]
+        if ln.strip()
+        for t in (ln.split(delim) if delim else ln.split())
+    ]
     if (
         delim != ","
         and body
