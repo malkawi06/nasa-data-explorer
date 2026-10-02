@@ -25,7 +25,7 @@ DATE_VALUE_RE = re.compile(
     r"|\d{1,2}[-/.]\d{1,2}[-/.]\d{4}"
 )
 DAY_FIRST_RE = re.compile(r"(\d{1,2})[-/.](\d{1,2})[-/.]\d{4}")
-MAX_TREND_COLS = 8
+MAX_TREND_COLS = 20
 MAX_TS_COLS = 4
 
 

@@ -39,36 +39,6 @@
 
       <ul id="files" class="file-list" aria-label="Files"></ul>
 
-      <details class="panel options">
-        <summary data-i18n="options">Options: variable, region, dates</summary>
-        <div class="fields">
-          <label><span data-i18n="var">Variable / column</span><input id="opt-var" type="text" placeholder="t2m" autocomplete="off"></label>
-          <label><span data-i18n="bbox">Bounding box W,S,E,N</span><input id="opt-bbox" type="text" placeholder="34,29,40,34" inputmode="decimal" autocomplete="off"></label>
-          <div class="pair">
-            <label><span data-i18n="start">Start date</span><input id="opt-start" type="date"></label>
-            <label><span data-i18n="end">End date</span><input id="opt-end" type="date"></label>
-          </div>
-        </div>
-        <p class="hint" id="opt-error" role="alert"></p>
-      </details>
-
-      <details class="panel" id="power-panel">
-        <summary data-i18n="powerTitle">☀️ NASA POWER climate for any point</summary>
-        <form id="power-form" class="fields" autocomplete="off">
-          <div class="pair">
-            <label><span data-i18n="lat">Latitude</span><input id="power-lat" type="number" step="any" min="-90" max="90" required placeholder="29.57"></label>
-            <label><span data-i18n="lon">Longitude</span><input id="power-lon" type="number" step="any" min="-180" max="180" required placeholder="35.42"></label>
-          </div>
-          <div class="pair">
-            <label><span data-i18n="start">Start date</span><input id="power-start" type="date"></label>
-            <label><span data-i18n="end">End date</span><input id="power-end" type="date"></label>
-          </div>
-          <button class="btn primary" type="submit" data-i18n="powerRun">Get data and analyse</button>
-        </form>
-        <p class="hint" data-i18n="powerHint">Daily temperature, rain, humidity, wind, sunlight and clouds from NASA POWER. Empty dates = the last 10 full years.</p>
-        <p class="hint" id="power-status" role="status"></p>
-      </details>
-
       <details class="panel" id="ai-settings">
         <summary data-i18n="aiSettings">AI settings (bring your own key)</summary>
         <form id="ai-form" class="fields" autocomplete="off">

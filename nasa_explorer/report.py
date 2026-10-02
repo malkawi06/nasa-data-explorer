@@ -361,8 +361,6 @@ def _paper(s: dict, L: dict) -> str:
         facts[L["references"]] = f"{ref['count']} ({ref.get('dois', 0)} DOI)"
     if facts:
         out.append(f"<div class='card'>{to_html(facts)}</div>")
-    if coords:
-        out.append(f"<p class='muted small'>{html.escape(L['coords_hint'])}</p>")
     if avail := s.get("data_availability"):
         rows = [{"p.": a["page"], L["sentence"]: a["text"]} for a in avail]
         out.append(f"<h3>{L['data_availability']}</h3><div class='card'>{to_html(rows)}</div>")

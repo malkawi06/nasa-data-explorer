@@ -140,9 +140,3 @@ def test_image_vision_is_opt_in_and_boxes_reach_the_panel(samples, tmp_path, mon
     assert [o["box"] for o in saved["visual_observations"]] == [[0, 0, 500, 500], None]
     assert saved["verification"]["visual"] == 2
     assert "<rect" in done["panel"] and done["panel"].count("<rect") == 1
-
-
-def test_power_urls_default_to_the_last_ten_full_years():
-    urls = json.loads(bridge.power_urls(29.57, 35.42))
-    assert urls["daily"].startswith("https://power.larc.nasa.gov/api/temporal/daily/point")
-    assert int(urls["end"][:4]) - int(urls["start"][:4]) == 9

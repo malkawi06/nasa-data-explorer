@@ -16,7 +16,7 @@ from .stats import MAX_SAMPLE, anomalies, numeric_stats, seasonal_cycle, time_co
 LAT_NAMES = {"lat", "latitude", "nav_lat", "lats", "xlat", "lat_0", "gridlat_0"}
 LON_NAMES = {"lon", "longitude", "nav_lon", "lons", "long", "xlong", "lon_0", "gridlon_0"}
 MAX_MAP_SIDE = 1500
-MAX_TREND_VARS = 6
+MAX_TREND_VARS = 20
 
 
 def _match(da: xr.DataArray, names: set[str], std: str, units: tuple[str, ...]) -> bool:

@@ -98,8 +98,6 @@ import bridge`);
     return bridge.analyse_dir(dir, options, onFile);
   },
 
-  // NASA POWER URLs (the HTTP request happens on the main thread)
-  power_urls: (...a) => bridge.power_urls(...a),
 
   // AI and chat steps (the provider call itself happens on the main thread, see ai.js)
   ai_start: (...a) => bridge.ai_start(...a),

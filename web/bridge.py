@@ -11,7 +11,7 @@ import re
 import shutil
 from pathlib import Path
 
-from nasa_explorer import ai, power, report
+from nasa_explorer import ai, report
 from nasa_explorer.ai_view import render_ai
 from nasa_explorer.core import ReadOptions
 from nasa_explorer.pipeline import FileReport, process
@@ -97,20 +97,6 @@ def _entry(key: str, rep: FileReport, payload: dict) -> dict:
         "html": rep.html_path.read_text(encoding="utf-8"),
         "json": rep.json_path.read_text(encoding="utf-8"),
     }
-
-
-# --- NASA POWER (the browser does the HTTP requests) ---
-
-
-def power_urls(lat: float, lon: float, start: str = "", end: str = "") -> str:
-    s, e = (start, end) if start and end else power.default_period()
-    return json.dumps(
-        {
-            "daily": power.daily_url(lat, lon, s, e),
-            "start": s,
-            "end": e,
-        }
-    )
 
 
 # --- AI (bring your own key): Python builds and verifies prompts, JavaScript calls the provider ---

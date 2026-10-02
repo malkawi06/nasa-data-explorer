@@ -27,7 +27,6 @@ const T = {
     failed: "Could not start Python in this browser: ",
     done: (n) => `Done: ${n} report(s).`,
     tooBig: (name) => `${name} is larger than ${MAX_MB} MB. Use the desktop CLI for big files.`,
-    badBbox: "Bounding box must be four numbers: W,S,E,N",
     reader: "Reader", browser: "Where", category: "Category", extensions: "Extensions",
     yes: "browser", no: "desktop",
     runAI: "Run AI analysis", rerunAI: "Run again",
@@ -40,9 +39,6 @@ const T = {
     saved: "Saved.",
     desktop: "This format (GRIB / HDF4) needs native libraries the browser lacks. Run: pip install \"nasa-data-explorer[grib,hdf4]\" then nasa-explore FILE",
     analysing: "analysing…",
-    powerFetching: "Fetching NASA POWER data…",
-    powerFailed: "NASA POWER request failed: ",
-    badPoint: "Latitude must be -90..90 and longitude -180..180.",
   },
   ar: {
     title: "مستكشف بيانات ناسا",
@@ -56,11 +52,8 @@ const T = {
     failed: "تعذّر تشغيل Python في هذا المتصفح: ",
     done: (n) => `تم: ${n} تقرير.`,
     tooBig: (name) => `${name} أكبر من ${MAX_MB} ميغابايت. استخدم نسخة سطر الأوامر للملفات الكبيرة.`,
-    badBbox: "النطاق الجغرافي يجب أن يكون أربعة أرقام: W,S,E,N",
     drop: "اسحب الملفات أو انقر للاختيار",
     dropHint: "تبقى ملفاتك على جهازك. اختر كل أجزاء Shapefile معاً.",
-    options: "خيارات: المتغير، المنطقة، التواريخ",
-    var: "المتغير / العمود", bbox: "النطاق W,S,E,N", start: "تاريخ البداية", end: "تاريخ النهاية",
     formats: "الصيغ المدعومة",
     formatsHint: "تُحمَّل المكتبات الإضافية عند الحاجة أول مرة. صيغ «سطح المكتب» تحتاج نسخة Python المثبّتة.",
     footer: "صُنع لتحدي ناسا Space Apps 2026 · غير تابع لناسا",
@@ -86,10 +79,6 @@ const T = {
     f2t: "أكثر من 30 صيغة", f2: "تُكتشف الصيغة من محتوى الملف نفسه، حتى لو كان الامتداد خاطئاً.",
     f3t: "ذكاء اصطناعي مُدقَّق", f3: "ملخص اختياري يُفحص فيه كل رقم مقابل البيانات.",
     analysing: "جارٍ التحليل…",
-    powerTitle: "☀️ مناخ NASA POWER لأي نقطة", lat: "خط العرض", lon: "خط الطول", powerRun: "اجلب البيانات وحلّلها",
-    powerHint: "حرارة وأمطار ورطوبة ورياح وإشعاع شمسي وغيوم يومية من NASA POWER. اترك التواريخ فارغة لآخر 10 سنوات كاملة.",
-    powerFetching: "جارٍ جلب بيانات NASA POWER…", powerFailed: "فشل طلب NASA POWER: ",
-    badPoint: "خط العرض بين -90 و90، وخط الطول بين -180 و180.",
   },
 };
 
@@ -328,21 +317,6 @@ $(".dl-json").onclick = () => download(`${baseName(current())}.json`, current().
 
 // ---------------------------------------------------------------- analysis
 
-function readOptions() {
-  const bboxText = $("#opt-bbox").value.trim();
-  let bbox = null;
-  $("#opt-error").textContent = "";
-  if (bboxText) {
-    bbox = bboxText.split(",").map((v) => Number(v.trim()));
-    if (bbox.length !== 4 || bbox.some((v) => !Number.isFinite(v)) || bbox[1] > bbox[3]) {
-      $("#opt-error").textContent = t("badBbox");
-      $(".options").open = true;
-      return null;
-    }
-  }
-  return { var: $("#opt-var").value.trim(), bbox, start: $("#opt-start").value, end: $("#opt-end").value, lang: state.lang };
-}
-
 function enqueue(files) {
   files = files.filter(Boolean);
   if (!files.length) return;
@@ -357,8 +331,6 @@ function enqueue(files) {
 }
 
 async function analyse(files) {
-  const options = readOptions();
-  if (!options) return;
   state.busy = true;
   const run = `run${++state.runs}`;
   const placeholder = `${run}/…`;
@@ -369,7 +341,7 @@ async function analyse(files) {
     const exts = files.map((f) => f.name.split(".").pop().toLowerCase());
     await rpc("provide", [...new Set(exts.flatMap((e) => BY_EXT[e] || []))]);
     const payload = await Promise.all(files.map(async (f) => ({ name: f.name, data: await f.arrayBuffer() })));
-    const opts = JSON.stringify(options);
+    const opts = JSON.stringify({ lang: state.lang }); // every variable, the whole area and period
     let results = JSON.parse(await rpc("analyse", run, payload, opts));
     // a reader reported a missing optional library (format found by its bytes): load it and retry once
     if (await rpc("provide", [...new Set(results.flatMap((r) => r.missing))])) {
@@ -413,43 +385,6 @@ for (const target of [drop, $("#view")]) {
   target.addEventListener("drop", (e) => enqueue([...e.dataTransfer.files]));
 }
 for (const b of document.querySelectorAll(".lang button")) b.addEventListener("click", () => applyLang(b.dataset.lang));
-
-// ---------------------------------------------------------------- NASA POWER
-
-function point(latEl, lonEl, statusEl) {
-  const lat = Number(latEl.value), lon = Number(lonEl.value);
-  if (latEl.value === "" || lonEl.value === "" || !(Math.abs(lat) <= 90) || !(Math.abs(lon) <= 180)) {
-    statusEl.textContent = t("badPoint");
-    return null;
-  }
-  return [lat, lon];
-}
-
-async function fetchText(url) {
-  const resp = await fetch(url);
-  const text = await resp.text();
-  if (!resp.ok) throw new Error(`${resp.status} ${text.slice(0, 200)}`);
-  return text;
-}
-
-$("#power-form").addEventListener("submit", async (e) => {
-  e.preventDefault();
-  const status = $("#power-status");
-  const p = point($("#power-lat"), $("#power-lon"), status);
-  if (!p) return;
-  if (!state.ready) { status.textContent = t("loading"); return; }
-  status.textContent = t("powerFetching");
-  try {
-    const urls = JSON.parse(await rpc("power_urls", p[0], p[1], $("#power-start").value, $("#power-end").value));
-    const csv = await fetchText(urls.daily);
-    if (csv.trimStart().startsWith("{")) throw new Error(csv.slice(0, 300)); // POWER returns JSON errors
-    const name = `POWER_daily_${p[0]}_${p[1]}_${urls.start}_${urls.end}.csv`.replace(/-/g, "");
-    status.textContent = "";
-    enqueue([new File([csv], name, { type: "text/csv" })]);
-  } catch (err) {
-    status.textContent = t("powerFailed") + (err.message || err);
-  }
-});
 
 // ---------------------------------------------------------------- AI (bring your own key)
 

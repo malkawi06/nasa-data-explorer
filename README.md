@@ -115,8 +115,7 @@ by file or variable name:
 and VICAR are read through GDAL. The body comes from the CRS or the label; maps stay in lunar /
 Martian coordinates; LOLA/MOLA radii are turned into heights above the reference sphere.
 
-On the website: *NASA POWER climate for any point* in the sidebar downloads a daily series and
-analyses it like any other file.
+NASA POWER daily data for any point: `nasa-explore --power LAT,LON` (command line).
 
 ## AI layer (optional)
 
