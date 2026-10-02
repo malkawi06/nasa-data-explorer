@@ -8,7 +8,7 @@ import numpy as np
 import pandas as pd
 import xarray as xr
 
-from .. import analog, bodies, plots
+from .. import bodies, plots
 from ..core import ReadOptions, ReadResult
 from . import terrain, vegetation
 from .stats import MAX_SAMPLE, anomalies, numeric_stats, seasonal_cycle, time_coverage, trend
@@ -436,20 +436,6 @@ def analyze_grid(res: ReadResult, opts: ReadOptions) -> tuple[dict, list[tuple[s
     }
     if greens and "mean" in greens:
         out["vegetation"] = greens
-        if body == "Earth":
-            feats = {"ndvi": greens["mean"]}
-            out["analog"] = {
-                "features": feats,
-                "scores": analog.score_all(feats),
-                "partial": "vegetation",
-            }
     if relief:
         out["terrain"] = relief
-        if body == "Earth":  # terrain half of the analog score; climate comes from POWER
-            feats = analog.terrain_features(relief)
-            out["analog"] = {
-                "features": feats,
-                "scores": analog.score_all(feats),
-                "partial": "terrain",
-            }
     return out, figs

@@ -1,27 +1,20 @@
-"""Terrain of elevation models, Moon/Mars data and the analog finder (with real POWER data)."""
+"""Terrain of elevation models, Moon/Mars data, NASA POWER points and paper facts."""
 
-import json
 import math
-from pathlib import Path
 
 import numpy as np
 import pytest
 
-from nasa_explorer import analog, bodies, power
+from nasa_explorer import bodies, power
 from nasa_explorer.core import ReadOptions
-from nasa_explorer.pipeline import analog_report, iter_inputs, process, process_file
+from nasa_explorer.pipeline import iter_inputs, process, process_file
 
 rasterio = pytest.importorskip("rasterio")
 from rasterio.transform import from_origin  # noqa: E402
 
-DATA = Path(__file__).parent / "data" / "power"
 MOON = "+proj=stere +lat_0=-90 +lon_0=0 +k=1 +x_0=0 +y_0=0 +R=1737400 +units=m +no_defs"
 MARS = "+proj=eqc +lat_ts=0 +lat_0=0 +lon_0=0 +x_0=0 +y_0=0 +R=3396190 +units=m +no_defs"
 RNG = np.random.default_rng(11)
-
-
-def _clim(name):
-    return json.loads((DATA / f"{name}.json").read_text(encoding="utf-8"))
 
 
 def _tif(path, z, crs, px, origin=(0.0, 0.0), **kw):
@@ -118,7 +111,6 @@ def test_moon_polar_dem_with_scale_offset(tmp_path):
     assert abs(a["terrain"]["elevation_m"]["median"]) < 5  # radius turned into height
     assert a["coverage"]["space"]["bbox"][1] == pytest.approx(-90, abs=0.01)  # lunar latitudes
     assert "lola" in [p["key"] for p in a["products"]]
-    assert "analog" not in a  # analog scores are for Earth sites
 
 
 def test_isis3_pds4_pds3_and_hgt(tmp_path):
@@ -150,69 +142,11 @@ def test_isis3_pds4_pds3_and_hgt(tmp_path):
     assert reps["N31E035.hgt"].analysis["terrain"]["at_analysis_resolution"][
         "pixel_m"
     ] == pytest.approx(92.7, abs=0.5)
-    # the Earth tile is compared with the Moon and Mars DEMs processed with it
-    rows = reps["N31E035.hgt"].analysis["terrain_analogs"]
-    assert {r["body"] for r in rows} >= {"Mars"}
 
 
-def test_analog_scores_rank_expert_analogs_first():
-    feats = {
-        k: analog.climate_features(_clim(k))
-        for k in ("wadi_rum", "atacama", "dry_valleys", "haughton", "irbid")
-    }
-    assert feats["atacama"]["precip_mm_yr"] == pytest.approx(8.5, abs=0.3)
-    assert feats["wadi_rum"]["elevation_m"] == pytest.approx(1076.35)
-
-    def order(target):
-        return [
-            k
-            for _, k in sorted(
-                ((analog.score(f, analog.TARGETS[target])["score"], k) for k, f in feats.items()),
-                reverse=True,
-            )
-        ]
-
-    assert order("moon_south_pole")[:2] == ["dry_valleys", "haughton"]
-    assert order("mars_low_latitude")[:2] == ["atacama", "wadi_rum"]
-    assert order("mars_polar")[0] == "dry_valleys"
-    assert order("mars_low_latitude")[-1] in ("haughton", "irbid")
-    sc = analog.score(feats["wadi_rum"], analog.TARGETS["mars_low_latitude"])
-    assert sc["coverage_pct"] < 100 and "Vegetation (NDVI)" in sc["missing"]  # no NDVI, no DEM
-
-
-def test_analog_report_and_cli(tmp_path, monkeypatch, capsys):
-    names = ["wadi_rum", "atacama", "dry_valleys", "haughton", "irbid"]
-    sites = [{"name": n, "lat": 0.0, "lon": 0.0, "analog_for": ""} for n in names]
-    sites[1]["analog_for"] = "Mars"
-    feats = [analog.climate_features(_clim(n)) for n in names] + [None]
-    rep = analog_report(
-        "mars_low_latitude",
-        sites + [{"name": "offline", "lat": 1, "lon": 1, "analog_for": ""}],
-        feats,
-        tmp_path,
-    )
-    ranking = rep.analysis["ranking"]
-    assert ranking["ranking"][0]["name"] == "atacama"
-    assert ranking["ranking"][-1]["score"] is None
-    assert ranking["validation"]["in_top_third"] == 1
-    html = rep.html_path.read_text(encoding="utf-8")
-    assert "Site ranking" in html and "atacama" in html and "<img" in html
-
-    def fake(lat, lon, cache=None):  # every built-in site gets Wadi Rum's climate
-        return _clim("wadi_rum")
-
-    monkeypatch.setattr(power, "fetch_climatology", fake)
-    from nasa_explorer.cli import main
-
-    assert main(["--analog", "moon_south_pole", "--out", str(tmp_path / "cli")]) == 0
-    out = capsys.readouterr().out
-    assert "1." in out and "report:" in out
-
-
-def test_power_urls_and_table_features(tmp_path):
+def test_power_urls_and_point_table(tmp_path):
     url = power.daily_url(29.57, 395.42 - 360, "2015-01-01", "2024-12-31")
     assert "start=20150101" in url and "community=RE" in url and "T2M_RANGE" in url
-    assert "longitude=35.42" in power.climatology_url(29.57, 35.42)
     with pytest.raises(ValueError):
         power.daily_url(95, 0, "2020-01-01", "2020-12-31")
     days = np.arange(730)
@@ -228,65 +162,9 @@ def test_power_urls_and_table_features(tmp_path):
     a = process_file(
         tmp_path / "POWER_point.csv", ReadOptions(plots=False), tmp_path / "r"
     ).analysis
-    f = a["analog"]["features"]
-    assert f["precip_mm_yr"] == pytest.approx(36.5, abs=0.5) and f["abs_lat"] == 29.57
-    assert f["t_range_c"] == pytest.approx(16, abs=0.5) and f["elevation_m"] == 1076.35
-    assert (
-        a["analog"]["scores"]["mars_low_latitude"]["score"]
-        > a["analog"]["scores"]["mars_polar"]["score"]
-    )
-
-
-def test_terrain_comparison_is_symmetric_and_bounded():
-    prof = {
-        "by_baseline_m": {
-            "100": {"slope_hist": [0.5, 0.3, 0.2] + [0] * 27, "roughness_tri_m": 2.0}
-        },
-        "depressions": {"per_1000_km2": 10},
-    }
-    other = {
-        "by_baseline_m": {
-            "100": {"slope_hist": [0.0, 0.0, 0.2] + [0.8] + [0] * 26, "roughness_tri_m": 8.0}
-        },
-        "depressions": {"per_1000_km2": 0.0},
-    }
-    same = analog.compare_terrain(prof, prof)
-    assert same["similarity"] == 100
-    diff = analog.compare_terrain(prof, other)
-    assert 0 <= diff["similarity"] < 60
-    assert analog.compare_terrain(prof, {"by_baseline_m": {"300": {}}}) is None
-
-
-def test_bridge_analog_run_uses_local_dem(tmp_path, monkeypatch):
-    import sys
-
-    web = Path(__file__).resolve().parents[1] / "web"
-    monkeypatch.syspath_prepend(str(web))
-    sys.modules.pop("bridge", None)
-    import bridge
-
-    monkeypatch.setattr(bridge, "WORK", tmp_path / "work")
-    src = Path(bridge.new_run("run1"))
-    flat = 1076 + _bowl(200, (100, 100), 12, 40) + RNG.normal(0, 0.2, (200, 200))
-    _tif(src / "wadi_rum_dem.tif", flat.astype("float32"), "EPSG:4326", 1 / 3600, (35.4, 29.6))
-    json.loads(bridge.analyse_dir(str(src), json.dumps({"lang": "en"})))
-    urls = json.loads(bridge.power_urls(29.57, 35.42))
-    assert urls["daily"].startswith("https://power.larc.nasa.gov/api/temporal/daily/point")
-    sites = [
-        {"name": "Wadi Rum DEM site", "lat": 29.59, "lon": 35.42, "analog_for": ""},
-        {"name": "offline", "lat": 0, "lon": 0, "analog_for": ""},
-    ]
-    out = json.loads(
-        bridge.analog_run(
-            "run2", "moon_south_pole", json.dumps(sites), json.dumps([_clim("wadi_rum"), None])
-        )
-    )
-    payload = json.loads(out[0]["json"])
-    top = payload["analysis"]["ranking"]["ranking"][0]
-    assert top["name"] == "Wadi Rum DEM site"
-    assert top["features"]["depressions_per_1000_km2"] is not None  # terrain from the analysed DEM
-    assert payload["analysis"]["ranking"]["ranking"][1]["score"] is None
-    assert json.loads(bridge.analog_sites())["sites"][0]["name"].startswith("Atacama")
+    assert a["summary"]["n_rows"] == 730
+    assert a["statistics"]["PRECTOTCORR"]["mean"] == pytest.approx(0.10)
+    assert a["coverage"]["time"]["column"] == "YEAR+MO+DY"
 
 
 def test_renamed_hgt_tile_and_binary_is_not_text(tmp_path):
@@ -315,10 +193,6 @@ def test_ndvi_raster_gets_vegetation_shares(tmp_path):
     veg = a["vegetation"]
     assert veg["mean"] == pytest.approx(0.05, abs=0.01)
     assert veg["share_pct"]["bare_0_0.1"] > 80
-    assert (
-        a["analog"]["partial"] == "vegetation"
-        and a["analog"]["scores"]["mars_low_latitude"]["score"] == 100
-    )
 
 
 def test_paper_facts():
@@ -351,25 +225,3 @@ def test_planetary_radius_stats_and_grouped_quality(tmp_path):
     st = a["statistics"][a["terrain"]["variable"]]
     assert abs(st["p50"]) < 5 and st["min"] < -60  # heights, not radii
     assert "outliers" not in {q["code"] for q in a["quality"]}  # craters are not outliers
-
-
-def test_ranking_reports_weight_sensitivity_and_baselines():
-    names = {
-        "atacama": "Atacama Desert (Yungay), Chile",
-        "dry_valleys": "McMurdo Dry Valleys, Antarctica",
-        "haughton": "Haughton Crater, Devon Island, Canada",
-        "wadi_rum": "Wadi Rum, Jordan",
-    }
-    sites = [next(s for s in analog.SITES if s["name"] == n) for n in names.values()]
-    sites.append({"name": "Irbid, Jordan", "lat": 32.55, "lon": 35.85, "analog_for": ""})
-    feats = [
-        analog.climate_features(json.loads((DATA / f"{k}.json").read_text(encoding="utf-8")))
-        for k in [*names, "irbid"]
-    ]
-    rk = analog.rank(sites, feats, "mars_polar")
-    rb = rk["robustness"]
-    assert rb["draws"] == analog.DRAWS and 0 <= rb["auc_range"][0] <= rb["auc"] + 1e-9
-    assert rb["best_single_factor"] and "In-sample" in rb["text"]
-    for r in rk["ranking"]:
-        lo, hi = r["score_range"]
-        assert lo <= r["score"] <= hi and r["rank_range"][0] <= r["rank"] <= r["rank_range"][1]

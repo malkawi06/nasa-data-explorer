@@ -11,10 +11,10 @@ import re
 import shutil
 from pathlib import Path
 
-from nasa_explorer import ai, analog, power, report
+from nasa_explorer import ai, power, report
 from nasa_explorer.ai_view import render_ai
 from nasa_explorer.core import ReadOptions
-from nasa_explorer.pipeline import FileReport, analog_report, process
+from nasa_explorer.pipeline import FileReport, process
 from nasa_explorer.registry import readers
 
 WORK = Path("/tmp/nasa_explorer_web")
@@ -99,7 +99,7 @@ def _entry(key: str, rep: FileReport, payload: dict) -> dict:
     }
 
 
-# --- NASA POWER and the Moon / Mars analog finder (the browser does the HTTP requests) ---
+# --- NASA POWER (the browser does the HTTP requests) ---
 
 
 def power_urls(lat: float, lon: float, start: str = "", end: str = "") -> str:
@@ -107,59 +107,10 @@ def power_urls(lat: float, lon: float, start: str = "", end: str = "") -> str:
     return json.dumps(
         {
             "daily": power.daily_url(lat, lon, s, e),
-            "climatology": power.climatology_url(lat, lon),
             "start": s,
             "end": e,
         }
     )
-
-
-def analog_sites() -> str:
-    targets = [
-        {"key": t.key, "name": t.name, "description": t.description}
-        for t in analog.TARGETS.values()
-    ]
-    return json.dumps({"targets": targets, "sites": list(analog.SITES)})
-
-
-def _inside(bbox, lat: float, lon: float) -> bool:
-    return bool(bbox) and len(bbox) == 4 and bbox[0] <= lon <= bbox[2] and bbox[1] <= lat <= bbox[3]
-
-
-def _local_features(lat: float, lon: float) -> dict:
-    """Terrain and NDVI from files already analysed in this session that cover the site."""
-    out: dict = {}
-    for rep, _, _ in _REPORTS.values():
-        a = rep.analysis or {}
-        bbox = (a.get("coverage", {}).get("space") or {}).get("bbox")
-        if a.get("body", "Earth") != "Earth" or not _inside(bbox, lat, lon):
-            continue
-        if a.get("terrain"):
-            out.update(
-                {k: v for k, v in analog.terrain_features(a["terrain"]).items() if v is not None}
-            )
-        main = str(a.get("main_variable") or "")
-        if "ndvi" in (rep.file + main).lower() and main in a.get("statistics", {}):
-            mean = a["statistics"][main].get("mean")
-            if mean is not None:
-                out["ndvi"] = mean / 10000 if mean > 1.5 else mean  # MODIS stores NDVI × 10000
-    return out
-
-
-def analog_run(run: str, target: str, sites_json: str, clims_json: str, lang: str = "en") -> str:
-    """Rank sites with the climatologies the browser fetched (None where a fetch failed)."""
-    sites, clims = json.loads(sites_json), json.loads(clims_json)
-    features = []
-    for site, clim in zip(sites, clims, strict=True):
-        feats = analog.climate_features(clim) if clim else {}
-        feats.update(_local_features(float(site["lat"]), float(site["lon"])))
-        features.append(feats or None)
-    out_dir = WORK / "out" / run
-    rep = analog_report(target, sites, features, out_dir, lang)
-    payload = json.loads(rep.json_path.read_text(encoding="utf-8"))
-    key = f"{run}/{rep.file}"
-    _REPORTS[key] = (rep, payload, ReadOptions(lang=lang))
-    return json.dumps([_entry(key, rep, payload)])
 
 
 # --- AI (bring your own key): Python builds and verifies prompts, JavaScript calls the provider ---

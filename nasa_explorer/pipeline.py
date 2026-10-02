@@ -11,7 +11,7 @@ from dataclasses import dataclass, field
 from datetime import datetime
 from pathlib import Path
 
-from . import analog, archives, products, report
+from . import archives, products, report
 from .analysis import analyze
 from .analysis.quality import unreadable
 from .core import ReadOptions, ReadResult
@@ -271,102 +271,6 @@ def process_file(
     return rep
 
 
-def rewrite(rep: FileReport, lang: str) -> None:
-    """Re-render a written report after its analysis changed (e.g. cross-file comparisons)."""
-    payload = json.loads(rep.json_path.read_text(encoding="utf-8"))
-    payload["analysis"] = rep.analysis
-    rep.json_path.write_text(report.dumps(payload), encoding="utf-8")
-    body = report.render_body(payload, rep.plots, lang)
-    rep.html_path.write_text(report.page(f"{rep.file} - report", body, lang), encoding="utf-8")
-
-
-def compare_terrains(reports: list[FileReport], lang: str) -> None:
-    """Earth DEMs processed together with Moon/Mars DEMs get a terrain similarity to each."""
-    dems = [r for r in reports if r.json_path and (r.analysis or {}).get("terrain")]
-    others = [r for r in dems if r.analysis.get("body", "Earth") != "Earth"]
-    for rep in (r for r in dems if r.analysis.get("body", "Earth") == "Earth"):
-        rows = []
-        for o in others:
-            if cmp := analog.compare_terrain(rep.analysis["terrain"], o.analysis["terrain"]):
-                rows.append({"compared_with": o.file, "body": o.analysis["body"], **cmp})
-        if rows:
-            rep.analysis["terrain_analogs"] = sorted(rows, key=lambda r: -r["similarity"])
-            rewrite(rep, lang)
-
-
-def analog_report(
-    target: str, sites: list[dict], features: list[dict | None], out_dir: Path, lang: str = "en"
-) -> FileReport:
-    """Rank candidate sites as analogs of a Moon/Mars target and write the report."""
-    from . import plots
-
-    out_dir.mkdir(parents=True, exist_ok=True)
-    ranking = analog.rank(sites, features, target)
-    label = f"Analog sites - {analog.TARGETS[target].name}"
-    analysis = {
-        "summary": {
-            "target": analog.TARGETS[target].name,
-            "sites": len(sites),
-            "climate": "NASA POWER climatology, January 2001 - December 2020",
-        },
-        "coverage": {},
-        "statistics": {},
-        "trends": [],
-        "notes": [],
-        "ranking": ranking,
-        "quality": [],
-    }
-    rep = FileReport(label, out_dir, "analog", "Analysis", "analog", analysis)
-    scored = [r for r in ranking["ranking"] if r.get("score") is not None]
-    if scored:
-        figs = [
-            (
-                "Analog scores",
-                plots.analog_bars(scored, f"{analog.TARGETS[target].name}: analog score"),
-            ),
-            (
-                "Site map",
-                plots.site_map(
-                    scored, f"{analog.TARGETS[target].name}: candidate sites (colour = score)"
-                ),
-            ),
-        ]
-        stem = _safe_name(label)
-        plot_dir = out_dir / f"{stem}_plots"
-        plot_dir.mkdir(exist_ok=True)
-        for i, (title, png) in enumerate(figs, 1):
-            fname = f"{i:02d}_{_safe_name(title)}.png"
-            (plot_dir / fname).write_bytes(png)
-            rep.plots.append((title, f"{plot_dir.name}/{fname}", png))
-    payload = {
-        "file": label,
-        "source": "",
-        "reader": "analog",
-        "category": "Analysis",
-        "kind": "analog",
-        "size_bytes": 0,
-        "size_human": f"{len(sites)} sites",
-        "generated": f"{datetime.now():%Y-%m-%d %H:%M}",
-        "problems": [],
-        "error": None,
-        "analysis": analysis,
-        "plots": [{"title": t, "file": f} for t, f, _ in rep.plots],
-        "headline": (
-            f"{len(scored)} sites scored · best: {scored[0]['name']} ({scored[0]['score']}/100)"
-            if scored
-            else "no site could be scored"
-        ),
-    }
-    stem = _safe_name(label)
-    rep.json_path = out_dir / f"{stem}.json"
-    rep.json_path.write_text(report.dumps(payload), encoding="utf-8")
-    rep.html_path = out_dir / f"{stem}.html"
-    rep.html_path.write_text(
-        report.page(label, report.render_body(payload, rep.plots, lang), lang), encoding="utf-8"
-    )
-    return rep
-
-
 def process(
     path: str | Path,
     opts: ReadOptions | None = None,
@@ -418,7 +322,6 @@ def process(
     total = len(inputs)  # archives may add more; the count grows as they are opened
     for p, label in inputs:
         handle(p, label)
-    compare_terrains(reports, opts.lang)
 
     # index every report in out_dir, so repeated runs accumulate instead of overwriting
     entries = []

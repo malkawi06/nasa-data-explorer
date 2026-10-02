@@ -1,43 +1,9 @@
 # nasa-data-explorer
 
-**Which places on Earth best stand in for a permanent lunar south-polar base, a Mars landing
-site or a Mars polar site, and why?** (NASA Space Apps 2026: *Identify Earth locations that
-analog the permanent Moon base locations and Mars*.)
-
-nasa-data-explorer ranks Earth sites against each target with evidence you can audit. It uses
-NASA POWER climate for any point, the terrain of any elevation model (Earth, Moon or Mars) and
-vegetation (NDVI). Every factor shows its value, weight and the reason it matters. Every score
-comes with the range it moves through when the hand-set weights and levels change. It all runs
-in the browser: https://malkawi06.github.io/nasa-data-explorer/
-
-Results with real POWER 2001-2020 climatology for the five sites saved in `tests/data/power`.
-Irbid, a farmed city, is the control. The range is the 90% score range under weights ±30% and
-levels ±20%:
-
-| Target | 1st | 2nd | Lowest |
-|---|---|---|---|
-| Moon south-polar base | McMurdo Dry Valleys 90 (85-94) | Haughton Crater 74 (65-82) | Irbid, Jordan 8 |
-| Mars low-latitude landing site | Atacama 65 (58-70) | Wadi Rum, Jordan 58 (51-65) | Haughton Crater 11 |
-| Mars polar site | McMurdo Dry Valleys 88 (82-93) | Haughton Crater 59 (49-68) | Irbid, Jordan 8 |
-
-**What the score is not** (read this before quoting a number):
-- **It is not validated.** It is a transparent screening heuristic. The levels and weights are
-  documented assumptions in `nasa_explorer/analog.py`, not fitted values.
-- **The check is in-sample.** Known analogs always outrank the other sites, but the levels were
-  set knowing those sites. On these climate-only sites one factor alone (latitude, rainfall or
-  temperature) separates them just as well, and the report says so.
-- **Scores are per target.** A polar site is a poor hot-desert Mars analog by design (Dry
-  Valleys: 88 as a Mars polar analog, 29 as a low-latitude one).
-- **It leaves out what defines a Moon base site.** Illumination and Earth visibility from a
-  lunar DEM, regolith and geology/mineralogy are not modelled yet. For the Moon target, terrain
-  carries most of the weight; without a DEM the score is a climate and latitude proxy.
-- **POWER values are cell averages**, about 0.5° (MERRA-2) and 1° (CERES), not point
-  measurements.
-
-### Under the hood: a reader for almost any NASA file
-
-The analog evidence comes from a general analyzer. Drop in almost any scientific data file and
-get a report in minutes.
+Drop in almost any scientific data file and understand it in minutes. It covers Earth science,
+Moon and Mars data, NASA POWER climate and research papers, with optional AI explanations whose
+numbers are checked against the data. It runs in the browser:
+https://malkawi06.github.io/nasa-data-explorer/
 
 For every file it detects the format (by extension, then by magic bytes), reads it,
 and writes an HTML report plus a JSON summary with:
@@ -88,7 +54,6 @@ nasa-explore paper.pdf --ai --lang ar                 # Arabic report + AI paper
 nasa-explore data/ --ask "Which datasets measure soil moisture?"
 nasa-explore LDEM_80S_20M.IMG                         # lunar DEM: slopes, flat ground, craters
 nasa-explore --power 29.57,35.42                      # NASA POWER daily data for a point (last 10 years)
-nasa-explore --analog mars_low_latitude --sites my_sites.csv   # rank Earth sites as Mars analogs
 nasa-explore --formats                                # what's enabled in this environment
 nasa-explore --app                                    # Streamlit drag-and-drop UI
 ```
@@ -133,7 +98,8 @@ See [`examples/quickstart.ipynb`](examples/quickstart.ipynb). It also runs in Go
 Document readers also list the NASA missions and datasets they mention (MODIS, VIIRS, GPM, GRACE,
 SMAP, ICESat-2, MERRA-2, FIRMS, and others), with page numbers.
 
-## Moon / Mars analogs (Space Apps 2026: Earth analogs of lunar base and Mars sites)
+## Elevation models and Moon / Mars data
+
 
 **Terrain of any elevation model** (SRTM, Copernicus DEM, LOLA, MOLA, HiRISE DTMs, ...), found
 by file or variable name:
@@ -149,23 +115,8 @@ by file or variable name:
 and VICAR are read through GDAL. The body comes from the CRS or the label; maps stay in lunar /
 Martian coordinates; LOLA/MOLA radii are turned into heights above the reference sphere.
 
-**Analog score**: how much an Earth site resembles a target environment:
-- Moon south-polar base (cold, dry, high latitude, cratered, flat pads).
-- Mars low/mid-latitude landing site (hyper-arid, dry air, clear sky, high altitude, gentle slopes).
-- Mars polar / ice-rich site (sub-zero, dry, high latitude).
-
-Each factor maps a measurable value (NASA POWER 2001-2020 climatology, DEM terrain, NDVI) from
-"not analog" (0) to "fully analog" (100); the weights and thresholds are documented in
-`nasa_explorer/analog.py`. The report shows every factor with its value, score, weight and the
-reason it matters, plus the data coverage. 24 built-in sites (expert-chosen analogs such as Atacama,
-Haughton, the Dry Valleys, plus candidates in Jordan) are scored with your own, so the ranking can
-be compared with expert choices. Every score also gets the range it moves through over 1000
-re-scorings with weights ±30% and levels ±20%. The comparison with single-factor baselines is
-in-sample (see the caveats at the top).
-
-On the website: *Moon / Mars analog finder* and *NASA POWER climate for any point* in the sidebar.
-DEM or NDVI files you analysed that cover a site add terrain and vegetation to its score; an Earth
-DEM analysed together with a Moon/Mars DEM gets a terrain similarity at a common baseline.
+On the website: *NASA POWER climate for any point* in the sidebar downloads a daily series and
+analyses it like any other file.
 
 ## AI layer (optional)
 

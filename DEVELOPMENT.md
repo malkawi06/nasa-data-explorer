@@ -24,8 +24,7 @@ Generic "drop any NASA/scientific file in, get a report" tool for Space Apps hac
 - `analysis/quality.py`: rule-based checks, run for every file. `products.py`: the NASA product
   catalog.
 - `bodies.py`: which planetary body a CRS/label describes. `analysis/terrain.py`: DEM slope,
-  roughness, depressions and the per-baseline profile. `analog.py`: Moon/Mars analog targets,
-  factor scoring, built-in sites, terrain comparison. `power.py`: NASA POWER URLs and downloads
+  roughness, depressions and the per-baseline profile. `power.py`: NASA POWER URLs and downloads
   (the browser fetches the same URLs itself).
 - `qa.py`: retrieval (sentence-transformers or TF-IDF).
 - `evals/`: AI eval cases with known truths (`python -m evals.run --provider X`).
@@ -66,8 +65,6 @@ Generic "drop any NASA/scientific file in, get a report" tool for Space Apps hac
 - `web/index.html` sets a strict CSP (no inline scripts, no eval): never add inline `<script>` or
   `on*=` handlers. Playwright's `wait_for_function` evaluates strings, so test contexts that use
   it pass `bypass_csp=True`; `test_file_content_cannot_run_script` runs with the policy on.
-- Analog scores are screening heuristics. `analog.robustness` re-scores with weights ±30% and
-  levels ±20%; keep the README caveats in sync when targets, weights or levels change.
 - Always pass `encoding="utf-8"` to file reads and writes: reports contain → × and Arabic, and
   Windows defaults to cp1252.
 - The AI cache key includes the provider *model* name. Scripted FakeProvider runs in one test
@@ -85,6 +82,4 @@ Generic "drop any NASA/scientific file in, get a report" tool for Space Apps hac
   tests exactly (tests compare them) without its O(n²) memory; pymannkendall is used only for the
   seasonal test. Depression filling (`terrain._filled`) uses row/column sweeps, also checked
   against plain erosion in the tests.
-- `tests/data/power/*.json` are real POWER climatology responses (2001-2020); the analog ranking
-  tests rely on them, so do not replace them with synthetic data.
 - Tests force `NASA_EXPLORER_EMBEDDINGS=tfidf` and clear AI keys; AI is tested with a fake provider.

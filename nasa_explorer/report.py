@@ -248,14 +248,6 @@ def kpi_tiles(rep: dict, L: dict) -> str:
                 L["at_baseline"].format(m=f"{res.get('pixel_m', 0):,.0f}"),
             )
         )
-    scores = [
-        (sc["score"], key)
-        for key, sc in (a.get("analog") or {}).get("scores", {}).items()
-        if sc.get("score") is not None
-    ]
-    if scores and not (a.get("analog") or {}).get("partial"):
-        best, key = max(scores)
-        tiles.append(_tile(L["best_match"], f"{best}/100", _target_name(key, L)))
     if e := a.get("events"):
         tiles.append(
             _tile(
@@ -409,91 +401,6 @@ def _terrain(t: dict, L: dict) -> str:
     return "".join(out)
 
 
-def _target_name(key: str, L: dict) -> str:
-    from .analog import TARGETS
-
-    return L.get(f"target_{key}", TARGETS[key].name if key in TARGETS else key)
-
-
-def _factor_rows(factors: list[dict], L: dict) -> list[dict]:
-    return [
-        {
-            L["factors"]: L.get(f"f_{f['key']}", f["label"]),
-            "value": "—"
-            if f.get("value") is None
-            else f"{f['value']:g} {f.get('unit', '')}".strip(),
-            "score": "—" if f.get("score") is None else f"{f['score']}/100",
-            "weight": f["weight"],
-            "why": f.get("why", ""),
-        }
-        for f in factors
-    ]
-
-
-def _analog(an: dict, L: dict) -> str:
-    out = []
-    if an.get("partial"):
-        out.append(f"<p class='muted'>{html.escape(L['partial_' + an['partial']])}</p>")
-    rows = []
-    for key, sc in an.get("scores", {}).items():
-        rows.append(
-            {
-                "target": _target_name(key, L),
-                L["analog_score"]: "—" if sc["score"] is None else f"{sc['score']}/100",
-                L["data_coverage"]: f"{sc['coverage_pct']}%",
-                L["missing_factors"]: ", ".join(sc.get("missing", [])),
-            }
-        )
-    out.append(f"<div class='card'>{to_html(rows)}</div>")
-    for key, sc in an.get("scores", {}).items():
-        if sc["score"] is not None:
-            out.append(
-                _fold(
-                    _target_name(key, L),
-                    f"<div class='card'>{to_html(_factor_rows(sc['factors'], L))}</div>",
-                )
-            )
-    out.append(f"<p class='muted small'>{html.escape(L['power_cells'])}</p>")
-    return "".join(out)
-
-
-def _ranking(rk: dict, L: dict) -> str:
-    out = [
-        f"<p><b>{html.escape(_target_name(rk['target'], L))}</b>: {html.escape(rk.get('description', ''))}</p>"
-    ]
-    out.append(f"<p class='muted small'>{html.escape(L['screening_note'])}</p>")
-    if v := rk.get("validation"):
-        out.append(f"<div class='card'>✔ {html.escape(v['text'])}</div>")
-    if rb := rk.get("robustness"):
-        out.append(f"<div class='card'>{html.escape(rb['text'])}</div>")
-    rows = [
-        {
-            "#": r["rank"],
-            "site": r["name"],
-            "lat, lon": f"{r['lat']:g}, {r['lon']:g}",
-            "status": (L["known_analog"] + f" ({r['analog_for']})")
-            if r.get("analog_for")
-            else L["candidate"],
-            L["analog_score"]: "—" if r.get("score") is None else f"{r['score']}/100",
-            L["score_range"]: "{}-{}".format(*r["score_range"]) if r.get("score_range") else "—",
-            L["rank_range"]: "{}-{}".format(*r["rank_range"]) if r.get("rank_range") else "—",
-            L["data_coverage"]: f"{r.get('coverage_pct', 0)}%",
-        }
-        for r in rk.get("ranking", [])
-    ]
-    out.append(f"<div class='card'>{to_html(rows)}</div>")
-    for r in rk.get("ranking", [])[:8]:
-        if r.get("factors"):
-            out.append(
-                _fold(
-                    f"{r['rank']}. {r['name']}",
-                    f"<div class='card'>{to_html(_factor_rows(r['factors'], L))}</div>",
-                )
-            )
-    out.append(f"<p class='muted small'>{html.escape(L['power_cells'])}</p>")
-    return "".join(out)
-
-
 def render_body(rep: dict, plots: list[tuple[str, str, bytes]], lang: str) -> str:
     L = labels(lang)
     a = rep["analysis"]
@@ -521,35 +428,15 @@ def render_body(rep: dict, plots: list[tuple[str, str, bytes]], lang: str) -> st
         sections.append(("trends", L["trends"], _section("trends", L["trends"], body)))
     if rep.get("kind") == "document" and (paper := _paper(a.get("summary", {}), L)):
         sections.append(("paper", L["paper"], _section("paper", L["paper"], paper)))
-    if a.get("ranking"):
-        sections.append(
-            ("ranking", L["ranking"], _section("ranking", L["ranking"], _ranking(a["ranking"], L)))
-        )
     if a.get("terrain"):
         sections.append(
             ("terrain", L["terrain"], _section("terrain", L["terrain"], _terrain(a["terrain"], L)))
-        )
-    if a.get("terrain_analogs"):
-        sections.append(
-            (
-                "terrain_analogs",
-                L["terrain_analogs"],
-                _section(
-                    "terrain_analogs",
-                    L["terrain_analogs"],
-                    f"<div class='card'>{to_html(a['terrain_analogs'])}</div>",
-                ),
-            )
         )
     if veg := a.get("vegetation"):
         shares = {k: f"{v:g}%" for k, v in veg["share_pct"].items()}
         body = f"<div class='card'>{to_html({'mean': veg['mean'], 'median': veg['median']})}{to_html(shares)}</div>"
         sections.append(
             ("vegetation", L["vegetation"], _section("vegetation", L["vegetation"], body))
-        )
-    if a.get("analog"):
-        sections.append(
-            ("analog", L["analog"], _section("analog", L["analog"], _analog(a["analog"], L)))
         )
     patterns = _patterns(a, L)
     if patterns:

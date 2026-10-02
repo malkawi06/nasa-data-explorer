@@ -52,24 +52,6 @@
         <p class="hint" id="opt-error" role="alert"></p>
       </details>
 
-      <details class="panel" id="analog-panel">
-        <summary data-i18n="analogTitle">🌍 Moon / Mars analog finder</summary>
-        <form id="analog-form" class="fields" autocomplete="off">
-          <label><span data-i18n="analogTarget">Target</span>
-            <select id="analog-target">
-              <option value="moon_south_pole" data-i18n="tMoon">Moon - permanent south-polar base</option>
-              <option value="mars_low_latitude" data-i18n="tMars">Mars - low/mid-latitude landing site</option>
-              <option value="mars_polar" data-i18n="tMarsPolar">Mars - polar / ice-rich site</option>
-            </select></label>
-          <label class="check"><input id="analog-builtin" type="checkbox" checked> <span data-i18n="analogBuiltin">Known analog sites + Jordan candidates (24)</span></label>
-          <label><span data-i18n="analogSites">Your sites, one per line: name, lat, lon</span>
-            <textarea id="analog-sites" rows="3" spellcheck="false" placeholder="Wadi Rum south, 29.40, 35.40"></textarea></label>
-          <button class="btn primary" type="submit" data-i18n="analogRun">Rank sites</button>
-        </form>
-        <p class="hint" data-i18n="analogHint">Climate for each site comes from NASA POWER (2001-2020). DEM or NDVI files you analysed that cover a site add terrain and vegetation. Every factor is explained.</p>
-        <p class="hint" id="analog-status" role="status"></p>
-      </details>
-
       <details class="panel" id="power-panel">
         <summary data-i18n="powerTitle">☀️ NASA POWER climate for any point</summary>
         <form id="power-form" class="fields" autocomplete="off">

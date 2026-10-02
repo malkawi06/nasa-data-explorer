@@ -43,11 +43,6 @@ const T = {
     powerFetching: "Fetching NASA POWER data…",
     powerFailed: "NASA POWER request failed: ",
     badPoint: "Latitude must be -90..90 and longitude -180..180.",
-    analogFetching: (x) => `Fetching NASA POWER climate ${x.done}/${x.total}…`,
-    analogRanking: "Scoring sites…",
-    analogNoSites: "Add at least one site (name, lat, lon) or keep the built-in list.",
-    analogBadLine: (x) => `Line ${x} is not "name, lat, lon".`,
-    analogDone: (x) => `Done: ${x.ok} of ${x.total} sites scored.`,
   },
   ar: {
     title: "مستكشف بيانات ناسا",
@@ -91,19 +86,10 @@ const T = {
     f2t: "أكثر من 30 صيغة", f2: "تُكتشف الصيغة من محتوى الملف نفسه، حتى لو كان الامتداد خاطئاً.",
     f3t: "ذكاء اصطناعي مُدقَّق", f3: "ملخص اختياري يُفحص فيه كل رقم مقابل البيانات.",
     analysing: "جارٍ التحليل…",
-    analogTitle: "🌍 مكتشف المواقع الشبيهة بالقمر / المريخ", analogTarget: "الهدف",
-    tMoon: "القمر - قاعدة دائمة عند القطب الجنوبي", tMars: "المريخ - موقع هبوط بخطوط عرض منخفضة/متوسطة", tMarsPolar: "المريخ - موقع قطبي غني بالجليد",
-    analogBuiltin: "مواقع شبيهة معروفة + مرشحون في الأردن (24)", analogSites: "مواقعك، سطر لكل موقع: الاسم، خط العرض، خط الطول",
-    analogRun: "رتّب المواقع",
-    analogHint: "مناخ كل موقع من NASA POWER (2001-2020). ملفات خرائط الارتفاع أو NDVI التي حللتها وتغطي الموقع تضيف التضاريس والنباتات. كل عامل مشروح.",
     powerTitle: "☀️ مناخ NASA POWER لأي نقطة", lat: "خط العرض", lon: "خط الطول", powerRun: "اجلب البيانات وحلّلها",
     powerHint: "حرارة وأمطار ورطوبة ورياح وإشعاع شمسي وغيوم يومية من NASA POWER. اترك التواريخ فارغة لآخر 10 سنوات كاملة.",
     powerFetching: "جارٍ جلب بيانات NASA POWER…", powerFailed: "فشل طلب NASA POWER: ",
     badPoint: "خط العرض بين -90 و90، وخط الطول بين -180 و180.",
-    analogFetching: (x) => `جلب مناخ NASA POWER ${x.done}/${x.total}…`, analogRanking: "حساب علامات المواقع…",
-    analogNoSites: "أضف موقعاً واحداً على الأقل (الاسم، خط العرض، خط الطول) أو أبقِ القائمة المدمجة.",
-    analogBadLine: (x) => `السطر ${x} ليس بالشكل «الاسم، خط العرض، خط الطول».`,
-    analogDone: (x) => `تم: حُسبت علامات ${x.ok} من ${x.total} موقع.`,
   },
 };
 
@@ -428,7 +414,7 @@ for (const target of [drop, $("#view")]) {
 }
 for (const b of document.querySelectorAll(".lang button")) b.addEventListener("click", () => applyLang(b.dataset.lang));
 
-// ---------------------------------------------------------------- NASA POWER + analog finder
+// ---------------------------------------------------------------- NASA POWER
 
 function point(latEl, lonEl, statusEl) {
   const lat = Number(latEl.value), lon = Number(lonEl.value);
@@ -462,68 +448,6 @@ $("#power-form").addEventListener("submit", async (e) => {
     enqueue([new File([csv], name, { type: "text/csv" })]);
   } catch (err) {
     status.textContent = t("powerFailed") + (err.message || err);
-  }
-});
-
-const CLIM = "nde-power-clim:";
-async function climatology(site) {
-  const id = `${CLIM}${Number(site.lat).toFixed(3)},${Number(site.lon).toFixed(3)}`;
-  try { const hit = localStorage.getItem(id); if (hit) return JSON.parse(hit); } catch { /* storage blocked */ }
-  const urls = JSON.parse(await rpc("power_urls", site.lat, site.lon));
-  const data = JSON.parse(await fetchText(urls.climatology));
-  try { localStorage.setItem(id, JSON.stringify(data)); } catch { /* quota: skip cache */ }
-  return data;
-}
-
-function parseSites(text, statusEl) {
-  const sites = [];
-  const lines = text.split("\n").map((l) => l.trim()).filter(Boolean);
-  for (let i = 0; i < lines.length; i++) {
-    const parts = lines[i].split(",").map((x) => x.trim());
-    const lat = Number(parts.at(-2)), lon = Number(parts.at(-1));
-    if (parts.length < 3 || !Number.isFinite(lat) || !Number.isFinite(lon) || Math.abs(lat) > 90 || Math.abs(lon) > 180) {
-      statusEl.textContent = t("analogBadLine", i + 1);
-      return null;
-    }
-    sites.push({ name: parts.slice(0, -2).join(", "), lat, lon, analog_for: "" });
-  }
-  return sites;
-}
-
-$("#analog-form").addEventListener("submit", async (e) => {
-  e.preventDefault();
-  const status = $("#analog-status");
-  if (!state.ready) { status.textContent = t("loading"); return; }
-  const own = parseSites($("#analog-sites").value, status);
-  if (!own) return;
-  const builtin = $("#analog-builtin").checked ? JSON.parse(await rpc("analog_sites")).sites : [];
-  const sites = [...builtin, ...own];
-  if (!sites.length) { status.textContent = t("analogNoSites"); return; }
-  const clims = new Array(sites.length).fill(null);
-  let done = 0;
-  const pull = async (queue) => {
-    for (let i = queue.shift(); i !== undefined; i = queue.shift()) {
-      try { clims[i] = await climatology(sites[i]); } catch (err) { console.warn(sites[i].name, err); }
-      status.textContent = t("analogFetching", { done: ++done, total: sites.length });
-    }
-  };
-  const queue = sites.map((_, i) => i);
-  await Promise.all([pull(queue), pull(queue), pull(queue)]); // 3 requests at a time
-  status.textContent = t("analogRanking");
-  const run = `run${++state.runs}`;
-  try {
-    const results = JSON.parse(await rpc("analog_run", run, $("#analog-target").value, JSON.stringify(sites), JSON.stringify(clims), state.lang));
-    for (const r of results) {
-      r.issues = 0;
-      r.ai = {};
-      r.chat = [];
-      state.results.set(r.key, r);
-      state.order.unshift(r.key);
-    }
-    status.textContent = t("analogDone", { ok: clims.filter(Boolean).length, total: sites.length });
-    select(results[0].key);
-  } catch (err) {
-    status.textContent = String(err.message || err);
   }
 });
 

@@ -231,7 +231,7 @@ CATALOG: tuple[Product, ...] = (
         search="GISTEMP",
         extra_links=(("GISTEMP", "https://data.giss.nasa.gov/gistemp/"),),
     ),
-    # --- elevation models and planetary data (Moon / Mars analog work) -------------------
+    # --- elevation models and planetary data (Moon / Mars) -----------------------------------
     Product(
         "lola",
         "LRO LOLA lunar topography (LDEM / polar DEMs)",
