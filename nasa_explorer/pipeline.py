@@ -220,6 +220,8 @@ def process_file(
     )
 
     plot_dir = out_dir / f"{stem}_plots"
+    for old in plot_dir.glob("[0-9][0-9]_*.png"):  # a re-run may draw fewer plots
+        old.unlink()
     for i, (title, png) in enumerate(figs, 1):
         plot_dir.mkdir(exist_ok=True)
         fname = f"{i:02d}_{_safe_name(title)[:60]}.png"

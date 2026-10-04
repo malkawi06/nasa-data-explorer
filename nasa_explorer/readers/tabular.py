@@ -60,12 +60,15 @@ def _find_table_start(lines: list[str]) -> tuple[int, str | None] | None:
     if (start := _start_for(lines, None, need)) is not None:
         return start, None
     body = [t for ln in lines[1 : need + 1] if (t := ln.strip())]
-    if len(body) >= 2 and all(_NUMBER.fullmatch(t) for t in body):
-        return 0, ","  # a single column of numbers under a header
+    if len(body) >= 2 and all(_NUMBER.fullmatch(t) or _DATE.fullmatch(t) for t in body):
+        return 0, ","  # a single column of numbers or dates under a header
     return None
 
 
 _NUMBER = re.compile(r"[-+]?(\d+\.?\d*|\.\d+)([eE][-+]?\d+)?")
+_DATE = re.compile(
+    r"\d{4}[-/.]\d{1,2}[-/.]\d{1,2}([ T][\d:.]+(Z|[+-][\d:]+)?)?|\d{1,2}[-/.]\d{1,2}[-/.]\d{4}"
+)
 _THOUSANDS = re.compile(r"[-+]?\d{1,3}(,\d{3})+(\.\d+)?")
 _DECIMAL_COMMA = re.compile(r"[-+]?\d+,\d+")
 

@@ -227,3 +227,43 @@ def test_archive_member_cannot_escape_into_a_sibling_folder(tmp_path):
     with pytest.raises(ValueError):
         _safe_target(tmp_path / "run", "../run_evil/x.csv")
     assert _safe_target(tmp_path / "run", "sub/x.csv").name == "x.csv"
+
+
+def test_archive_that_unpacks_too_large_is_refused(tmp_path, monkeypatch):
+    import gzip
+    import zipfile
+
+    from nasa_explorer import archives
+
+    monkeypatch.setattr(archives, "MAX_UNPACKED", 1000)
+    with zipfile.ZipFile(tmp_path / "bomb.zip", "w", zipfile.ZIP_DEFLATED) as zf:
+        zf.writestr("zeros.csv", "0\n" * 5000)  # 10 kB from a few hundred bytes
+    (tmp_path / "bomb.csv.gz").write_bytes(gzip.compress(b"0\n" * 5000))
+    for name in ("bomb.zip", "bomb.csv.gz"):
+        with pytest.raises(ValueError, match="unpacks to more than"):
+            archives.extract(tmp_path / name, tmp_path / f"out_{name}")
+    assert not list((tmp_path / "out_bomb.csv.gz").iterdir())  # partial output removed
+
+
+def test_date_only_csv_is_a_table(tmp_path):
+    days = pd.date_range("2020-01-01", periods=40).strftime("%Y-%m-%d")
+    (tmp_path / "d.csv").write_text("date\n" + "\n".join(days), encoding="utf-8")
+    rep = _run(tmp_path / "d.csv", tmp_path)
+    assert rep.kind == "table" and rep.analysis["coverage"]["time"]["n_steps"] == 40
+
+
+def test_fits_with_repeated_extension_names(tmp_path):
+    fits = pytest.importorskip("astropy.io.fits")
+    hdus = [fits.PrimaryHDU(), fits.ImageHDU(np.ones((10, 10)), name="SCI")]
+    hdus.append(fits.ImageHDU(np.ones((20, 30)), name="SCI"))
+    fits.HDUList(hdus).writeto(tmp_path / "hst.fits")
+    rep = _run(tmp_path / "hst.fits", tmp_path)
+    assert rep.reader == "fits" and set(rep.analysis["statistics"]) == {"SCI", "SCI_2"}
+
+
+def test_corrupt_file_with_a_known_signature_is_not_read_as_text(tmp_path):
+    pytest.importorskip("astropy")
+    header = b"SIMPLE  =                    T" + b" " * 50 + b"BITPIX  = garbage"
+    (tmp_path / "broken.fits").write_bytes(header + b" " * 3000)
+    rep = _run(tmp_path / "broken.fits", tmp_path)
+    assert rep.kind == "binary" and "unreadable" in _codes(rep)

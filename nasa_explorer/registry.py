@@ -126,6 +126,8 @@ def read_file(path: Path, opts: ReadOptions | None = None) -> tuple[ReadResult, 
             problems.append(f"{spec.name}: {exc}")
         except Exception as exc:  # a broken file must never crash a folder run
             problems.append(f"{spec.name} failed: {type(exc).__name__}: {exc}")
+            if any(head.startswith(m) for m in spec.magic):
+                break  # the bytes say what it is: a generic text reading would mislead
     from .readers.unknown import read_unknown
 
     return read_unknown(path, opts), "unknown", problems

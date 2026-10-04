@@ -50,18 +50,17 @@ def read_fits(path: Path, opts: ReadOptions) -> ReadResult:
             if hdu.is_image:
                 arr = np.asarray(hdu.data, dtype="float64")
                 info["shape"] = list(arr.shape)
+                key = f"{name}_{i}" if name in images else name  # HST files repeat "SCI"
                 dims = (
-                    [f"{name.lower()}_{a}" for a in ("z", "y", "x")[-arr.ndim :]]
+                    [f"{key.lower()}_{a}" for a in ("z", "y", "x")[-arr.ndim :]]
                     if arr.ndim <= 3
-                    else [f"{name.lower()}_d{j}" for j in range(arr.ndim)]
+                    else [f"{key.lower()}_d{j}" for j in range(arr.ndim)]
                 )
                 attrs = {
                     "units": str(hdr.get("BUNIT", "")),
                     "long_name": str(hdr.get("OBJECT", name)),
                 }
-                images[f"{name}_{i}" if name in images else name] = xr.DataArray(
-                    arr, dims=dims, attrs=attrs
-                )
+                images[key] = xr.DataArray(arr, dims=dims, attrs=attrs)
                 info["wcs"] = _sky_box(hdr, arr.shape)
             else:
                 df = _table(hdu)

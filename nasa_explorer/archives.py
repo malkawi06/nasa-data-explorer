@@ -5,11 +5,11 @@ from __future__ import annotations
 import bz2
 import gzip
 import lzma
-import shutil
 import tarfile
 import zipfile
 from pathlib import Path
 
+from .core import IN_BROWSER
 from .registry import file_suffixes, read_head, readers
 
 ARCHIVE_SUFFIXES = (
@@ -26,6 +26,17 @@ ARCHIVE_SUFFIXES = (
 )
 _STREAMS = {b"\x1f\x8b": gzip.open, b"BZh": bz2.open, b"\xfd7zXZ": lzma.open}
 MAX_MEMBERS = 500
+# Unpacked bytes per archive: a tiny "zip bomb" can expand to terabytes. The browser runs in
+# 32-bit WebAssembly with a few GB of memory at most, so its limit is lower.
+MAX_UNPACKED = (1 if IN_BROWSER else 8) * 1024**3
+
+
+def _check_size(total: int) -> None:
+    if total > MAX_UNPACKED:
+        raise ValueError(
+            f"archive unpacks to more than {MAX_UNPACKED / 1024**3:.0f} GB; extract it yourself "
+            "and analyse the files you need"
+        )
 
 
 def is_archive(path: Path) -> bool:
@@ -58,6 +69,7 @@ def extract(path: Path, dest: Path) -> list[Path]:
     if zipfile.is_zipfile(path):
         with zipfile.ZipFile(path) as zf:
             members = [m for m in zf.infolist() if not m.is_dir()][:MAX_MEMBERS]
+            _check_size(sum(m.file_size for m in members))  # declared sizes, checked again below
             for m in members:
                 _safe_target(dest, m.filename)
                 zf.extract(m, dest)
@@ -65,6 +77,7 @@ def extract(path: Path, dest: Path) -> list[Path]:
     if tarfile.is_tarfile(path):
         with tarfile.open(path) as tf:
             members = [m for m in tf.getmembers() if m.isfile()][:MAX_MEMBERS]
+            _check_size(sum(m.size for m in members))
             for m in members:
                 _safe_target(dest, m.name)
             # names are checked above; the "data" filter (Python 3.10.12+) also refuses links
@@ -79,7 +92,14 @@ def extract(path: Path, dest: Path) -> list[Path]:
                     name = name[: -len(sfx)] + (".tar" if sfx == ".tgz" else "")
                     break
             out = dest / (name if name != path.name else name + ".out")
+            written = 0
             with opener(path, "rb") as src, open(out, "wb") as dst:
-                shutil.copyfileobj(src, dst)
+                while block := src.read(1 << 20):  # stream: the size is unknown until the end
+                    written += len(block)
+                    if written > MAX_UNPACKED:
+                        dst.close()
+                        out.unlink()
+                        _check_size(written)
+                    dst.write(block)
             return [out]
     raise ValueError("not a supported archive")
