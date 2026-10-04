@@ -4,6 +4,7 @@ import json
 
 import numpy as np
 import pandas as pd
+import pytest
 from PIL import Image
 
 from nasa_explorer.core import ReadOptions
@@ -194,3 +195,35 @@ def test_jpeg2000_is_named_and_explained_in_the_browser(monkeypatch):
     monkeypatch.setattr(quality, "IN_BROWSER", True)
     (issue,) = quality.unreadable(5000, "JPEG 2000", ["GDAL: not a supported format"])
     assert issue["code"] == "unsupported_in_browser" and "gdal_translate" in issue["message"]
+
+
+def test_infinite_values_are_missing_not_a_crash(tmp_path):
+    rows = "\n".join(
+        f"{'inf' if i % 5 == 0 else i},{'-inf' if i == 3 else i * 2}" for i in range(40)
+    )
+    (tmp_path / "inf.csv").write_text("a,b\n" + rows, encoding="utf-8")
+    rep = process_file(tmp_path / "inf.csv", ReadOptions(), tmp_path / "r")
+    assert rep.error is None
+    assert rep.analysis["statistics"]["a"]["count"] == 32 and np.isfinite(
+        rep.analysis["statistics"]["a"]["max"]
+    )
+
+
+def test_sidecar_files_are_not_reported_as_data(tmp_path):
+    from nasa_explorer.pipeline import iter_inputs
+
+    for name in ("a.tif", "a.tif.aux.xml", "a.tif.ovr", "e.grib2", "e.grib2.5b7b6.idx", "p.shp"):
+        (tmp_path / name).write_bytes(b"x")
+    (tmp_path / "p.dbf").write_bytes(b"x")
+    (tmp_path / "lonely.dbf").write_bytes(b"x")  # no .shp: it is data on its own
+    names = {p.name for p in iter_inputs(tmp_path)}
+    assert names == {"a.tif", "e.grib2", "p.shp", "lonely.dbf"}
+
+
+def test_archive_member_cannot_escape_into_a_sibling_folder(tmp_path):
+    from nasa_explorer.archives import _safe_target
+
+    (tmp_path / "run").mkdir()
+    with pytest.raises(ValueError):
+        _safe_target(tmp_path / "run", "../run_evil/x.csv")
+    assert _safe_target(tmp_path / "run", "sub/x.csv").name == "x.csv"

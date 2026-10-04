@@ -21,20 +21,10 @@ from .registry import read_file, readers
 
 log = logging.getLogger("nasa_explorer")
 
-SIDECARS = {
-    ".shx",
-    ".dbf",
-    ".prj",
-    ".cpg",
-    ".sbn",
-    ".sbx",
-    ".qix",
-    ".aux.xml",
-    ".ovr",
-    ".idx",
-    ".ncx",
-    ".ncx4",
-}
+SHAPEFILE_PARTS = {".shx", ".dbf", ".prj", ".cpg", ".sbn", ".sbx", ".qix"}  # opened with the .shp
+# Companions named after their data file (x.tif.aux.xml, x.tif.ovr, x.grib2.5b7b6.idx):
+# metadata, overviews or index caches, not data of their own.
+SIDECARS = (".aux.xml", ".ovr", ".idx", ".ncx", ".ncx4")
 SKIP_NAMES = {".DS_Store", "Thumbs.db", "desktop.ini"}
 
 
@@ -94,11 +84,11 @@ def iter_inputs(folder: Path, out_dir: Path | None = None) -> list[Path]:
             )
             continue
         low = path.name.lower()
-        if any(low.endswith(s) for s in SIDECARS) and any(
-            path.with_name(path.name[: -len(s)] + ".shp").exists()
-            or path.with_suffix(".shp").exists()
-            for s in SIDECARS
-            if low.endswith(s)
+        if path.suffix.lower() in SHAPEFILE_PARTS and path.with_suffix(".shp").exists():
+            continue
+        if low.endswith(SIDECARS) and any(
+            q != path and q.is_file() and low.startswith(q.name.lower() + ".")
+            for q in path.parent.iterdir()
         ):
             continue
         if path.suffix.lower() in DATA_EXTS and label_for(path) != path:

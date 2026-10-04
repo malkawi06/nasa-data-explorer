@@ -163,8 +163,9 @@ The AI layer is configured with environment variables or a `.env` file (gitignor
   - "Verified" means consistent with what the tool computed, not that the computation or the
     sentence's wording is right. A number is only matched against the cited fact and its own
     variable, plus dates and counts. A finding that cites nothing and names no variable stays
-    unverified. In the tests, findings with planted wrong numbers come out "verified" in under 5%
-    of cases (1.4% on the ten-file test set), and the correct ones in over 85%.
+    unverified. In the tests, findings with planted wrong numbers must come out "verified" in under 5%
+    of cases and the correct ones in over 85%
+    (`tests/test_quality_ai.py::test_planted_wrong_numbers_are_rarely_verified`).
   - File text sent to the model is marked as data, not instructions. This lowers the risk of
     prompt injection from a paper but does not remove it.
 - **Review round:** if any claim fails, the model gets one round to fix it, with the exact
@@ -180,9 +181,9 @@ The AI layer is configured with environment variables or a `.env` file (gitignor
   - Impossible ranges for K/°C/% and negative rainfall.
   - Constant or mostly-missing variables, and outliers.
   - Duplicate or missing time steps, and 0-360 longitudes.
-- **Product cards:** the tool recognises about 18 well-known products (MODIS LST/NDVI, FIRMS, NASA POWER, IMERG,
+- **Product cards:** the tool recognises 30 well-known products (among them MODIS LST/NDVI, FIRMS, NASA POWER, IMERG,
   MERRA-2, GRACE, SMAP, ICESat-2, GEDI, Landsat C2, HLS, OCO-2, TEMPO, NISAR, Black Marble,
-  GISTEMP). Each card lists the resolution, the caveats people usually miss (for example the
+  GISTEMP, LOLA, MOLA, HiRISE and SRTM). Each card lists the resolution, the caveats people usually miss (for example the
   Landsat C2 scale factors, or FIRMS confidence codes) and Earthdata/Worldview links.
 
 ### Trends done right
@@ -241,7 +242,7 @@ Then open http://localhost:8000.
 - Files larger than about 600 MB, because of the browser's memory limits.
 - The AI layer, so that API keys never sit in a public page.
 
-The first visit downloads about 40 MB (Python plus the scientific stack). After that the browser
+The first visit downloads about 50 MB (Python, about 12 MB, plus the scientific stack). After that the browser
 caches it.
 
 ## Adding a new reader

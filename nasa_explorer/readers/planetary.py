@@ -11,7 +11,6 @@ from ..core import NotThisFormat, ReadOptions, ReadResult
 from ..registry import looks_like_text, read_head, reader
 from .geotiff import open_raster
 
-LABEL_EXTS = (".lbl", ".xml")
 DATA_EXTS = (".img", ".dat", ".raw", ".qub")
 PDS3_MAGIC = (b"PDS_VERSION_ID", b"CCSD3ZF", b"ODL_VERSION_ID", b"NJPL1I00PDS")
 KEYWORDS = (

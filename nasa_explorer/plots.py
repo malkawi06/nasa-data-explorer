@@ -336,7 +336,8 @@ def histograms(df: pd.DataFrame, title: str) -> bytes:
     nrows = int(np.ceil(n / ncols))
     fig, axes = plt.subplots(nrows, ncols, figsize=(3.2 * ncols, 2.3 * nrows), squeeze=False)
     for ax, col in zip(axes.ravel(), cols, strict=False):
-        vals = pd.to_numeric(df[col], errors="coerce").dropna().to_numpy()
+        vals = pd.to_numeric(df[col], errors="coerce").to_numpy(dtype="float64")
+        vals = vals[np.isfinite(vals)]
         if vals.size:
             ax.hist(
                 vals,

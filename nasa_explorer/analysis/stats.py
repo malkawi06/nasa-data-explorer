@@ -78,7 +78,7 @@ SEASONAL_STRENGTH = 0.2  # share of variance explained by the mean annual cycle
 
 
 def _clean_series(series: pd.Series) -> pd.Series:
-    s = pd.Series(series).dropna()
+    s = pd.Series(series).replace([np.inf, -np.inf], np.nan).dropna()
     if not isinstance(s.index, pd.DatetimeIndex):
         s.index = pd.to_datetime(s.index, errors="coerce")
         s = s[s.index.notna()]

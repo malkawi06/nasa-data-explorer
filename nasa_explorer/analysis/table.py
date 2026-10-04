@@ -32,7 +32,7 @@ MAX_TS_COLS = 4
 def _clean_sentinels(df: pd.DataFrame) -> dict[str, int]:
     replaced = {}
     for col in df.select_dtypes(include="number").columns:
-        mask = df[col].isin(SENTINELS)
+        mask = df[col].isin(SENTINELS) | np.isinf(df[col].astype("float64"))
         if mask.any():
             df.loc[mask, col] = np.nan
             replaced[str(col)] = int(mask.sum())
@@ -165,7 +165,7 @@ def analyze_table(res: ReadResult, opts: ReadOptions) -> tuple[dict, list[tuple[
     replaced = _clean_sentinels(df)
     if replaced:
         notes.append(
-            "fill values (-9999/-999/...) treated as missing: "
+            "fill values (-9999/-999/..., ±inf) treated as missing: "
             + ", ".join(f"{k}: {v}" for k, v in replaced.items())
         )
 

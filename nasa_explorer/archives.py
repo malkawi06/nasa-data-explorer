@@ -46,7 +46,7 @@ def is_archive(path: Path) -> bool:
 
 def _safe_target(dest: Path, name: str) -> Path:
     target = (dest / name).resolve()
-    if not str(target).startswith(str(dest.resolve())):
+    if not target.is_relative_to(dest.resolve()):  # a string prefix lets "run_x/" pass for "run/"
         raise ValueError(f"unsafe path in archive: {name}")
     return target
 
@@ -67,7 +67,9 @@ def extract(path: Path, dest: Path) -> list[Path]:
             members = [m for m in tf.getmembers() if m.isfile()][:MAX_MEMBERS]
             for m in members:
                 _safe_target(dest, m.name)
-            tf.extractall(dest, members=members, filter="data")
+            # names are checked above; the "data" filter (Python 3.10.12+) also refuses links
+            safe = {"filter": "data"} if hasattr(tarfile, "data_filter") else {}
+            tf.extractall(dest, members=members, **safe)
         return [dest / m.name for m in members]
     for magic, opener in _STREAMS.items():
         if head.startswith(magic):

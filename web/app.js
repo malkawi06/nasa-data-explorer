@@ -18,7 +18,7 @@ const DESKTOP_ONLY = new Set(["grib", "hdf4", "pdf"]);
 const T = {
   en: {
     loading: "Starting…",
-    pRuntime: "Downloading Python for your browser (~40 MB, first visit only)…",
+    pRuntime: "Downloading Python for your browser (~50 MB with the analysis libraries, first visit only)…",
     pPackages: (x) => `Installing analysis libraries (${x.done + 1}/${x.total}): ${x.label}`,
     pExtra: (x) => `Loading extra libraries: ${x.label}…`,
     pAnalyse: (x) => `Analysing ${x.label} (${x.done + 1} of ${x.total})…`,
@@ -43,7 +43,7 @@ const T = {
   ar: {
     title: "مستكشف بيانات ناسا",
     loading: "جارٍ البدء…",
-    pRuntime: "تنزيل Python للمتصفح (نحو 40 ميغابايت، في الزيارة الأولى فقط)…",
+    pRuntime: "تنزيل Python للمتصفح (نحو 50 ميغابايت مع مكتبات التحليل، في الزيارة الأولى فقط)…",
     pPackages: (x) => `تثبيت مكتبات التحليل (${x.done + 1}/${x.total}): ${x.label}`,
     pExtra: (x) => `تحميل مكتبات إضافية: ${x.label}…`,
     pAnalyse: (x) => `تحليل ${x.label} (${x.done + 1} من ${x.total})…`,
