@@ -47,6 +47,18 @@ def test_build_bundles_package(tmp_path, monkeypatch):
     assert {"index.html", "app.js", "ai.js", "style.css"} <= {
         p.name for p in (tmp_path / "dist").iterdir()
     }
+    pins = json.loads((tmp_path / "dist" / "wheels" / "index.json").read_text())
+    assert pins["pymannkendall"] == "pymannkendall==" + build.WHEELS["pymannkendall"][0]
+
+
+def test_every_package_the_browser_installs_is_pinned():
+    import re
+
+    worker = (ROOT / "web" / "worker.js").read_text(encoding="utf-8")
+    core = re.search(r"const CORE_PIP = \[([^\]]*)\]", worker).group(1)
+    extra = " ".join(re.findall(r"pip: \[([^\]]*)\]", worker))
+    names = set(re.findall(r'"([\w.-]+)"', core + " " + extra))
+    assert names and names <= set(build.WHEELS), names - set(build.WHEELS)
 
 
 def _run(tmp_path, monkeypatch, files):

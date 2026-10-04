@@ -1,6 +1,6 @@
 # nasa-data-explorer: development notes
 
-Generic "drop any NASA/scientific file in, get a report" tool for Space Apps hackathons.
+Generic "drop any NASA/scientific file in, get a report" tool.
 
 ## Commands
 - Setup: `uv venv .venv && . .venv/bin/activate && uv pip install -e ".[all,dev]"` (+ `tesseract` binary for OCR)
@@ -29,7 +29,7 @@ Generic "drop any NASA/scientific file in, get a report" tool for Space Apps hac
 - `qa.py`: retrieval (sentence-transformers or TF-IDF).
 - `evals/`: AI eval cases with known truths (`python -m evals.run --provider X`).
   `tests/e2e/`: browser tests. The harness stubs Pyodide and proxies bridge calls to CPython.
-- `web/`: the static site (GitHub Pages via `.github/workflows/pages.yml`; `netlify.toml` also works).
+- `web/`: the static site (GitHub Pages via `.github/workflows/pages.yml`, built with `web/build.py --wheels`).
   - Pyodide runs in a Web Worker (`worker.js`), so the page never freezes. `app.js` is the UI:
     a file list on the side and the selected report in the main area. The report is rendered into
     a shadow root, so its CSS stays scoped and the page scrolls normally.

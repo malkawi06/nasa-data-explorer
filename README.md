@@ -152,7 +152,7 @@ The AI layer is configured with environment variables or a `.env` file (gitignor
 - **Its own place in every report:** the AI analysis is a highlighted panel at the top. Without
   AI it shows how to run it.
 - **Structured answers:** the model returns JSON. For data files that is overview, key findings,
-  issues, next analyses, visualizations, hackathon ideas and caveats. For papers it is problem,
+  issues, next analyses, visualizations, project ideas and caveats. For papers it is problem,
   method, data used, findings, limitations, NASA datasets and ideas.
 - **Every number is traced (not proven true):**
   - For data files, each finding must cite a *fact path* such as `statistics.t2m.mean`, and the
@@ -206,10 +206,11 @@ The AI layer is configured with environment variables or a `.env` file (gitignor
 
 **Deploy (GitHub Pages):**
 1. Repo *Settings → Pages → Build and deployment → Source*: choose **GitHub Actions** (once).
-2. Every push to `main` runs `.github/workflows/pages.yml`: `python web/build.py`, then publishes
+2. Every push to `main` runs `.github/workflows/pages.yml`: `python web/build.py --wheels` (the
+   page plus the pinned Python wheels it installs), then publishes
    `web/dist` to `https://<user>.github.io/nasa-data-explorer/`.
 
-Any static host works the same way (`netlify.toml` is kept for Netlify).
+Any static host can serve `web/dist` the same way.
 
 **Run it locally:**
 ```bash
@@ -275,13 +276,13 @@ Return `ReadResult("grid", xarray.Dataset)`, `("table", DataFrame)`,
 `("document", pages=[...])` or `("image", ...)`, and the analysis, plots and report all work
 unchanged. Raise `NotThisFormat` to let the next candidate reader try the file.
 
-## Hackathon-day checklist
+## Checklist for a new dataset
 
-1. **Before the day**:
+1. **Before you start**:
    - Run `pip install -e ".[all]"` and `nasa-explore --formats` (everything should say `ok`).
    - Run `pytest -q`.
    - Pull a local model (`ollama pull qwen2.5:7b`) or put a free Gemini or Groq key in `.env`.
-2. **Get the data**: download the challenge's files into `data/`. Archives can stay zipped.
+2. **Get the data**: download the files into `data/`. Archives can stay zipped.
 3. **First pass**: run `nasa-explore data/` and open `reports/index.html`. Scan formats, time
    ranges, bounding boxes and missing %.
 4. **Focus**: run `nasa-explore data/file.nc --var X --bbox W,S,E,N --start ... --end ...` for your

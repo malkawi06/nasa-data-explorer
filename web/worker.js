@@ -13,7 +13,8 @@ const CORE_BATCHES = [
   ["matplotlib", "pillow"],
   ["jinja2", "xlrd"],
 ];
-const CORE_PIP = ["pymannkendall", "h5netcdf", "openpyxl", "markdown", "arabic-reshaper"];
+// Pinned in web/build.py (WHEELS); wheels/index.json maps each name to the file or version.
+const CORE_PIP = ["pymannkendall", "h5netcdf", "et-xmlfile", "openpyxl", "markdown", "arabic-reshaper"];
 
 // Optional readers: module name in a reader's `requires` -> what provides it.
 const MODULE_SOURCES = {
@@ -46,10 +47,16 @@ async function loadPkgs(pkgs) {
   todo.forEach((p) => loaded.add(p));
 }
 
+let pins = null;
 async function pipInstall(names) {
   const todo = names.filter((p) => !loaded.has(p));
   if (!todo.length) return;
-  await py.runPythonAsync(`import micropip\nawait micropip.install(${JSON.stringify(todo)})`);
+  pins ??= await (await fetch("wheels/index.json")).json();
+  const specs = todo.map((p) => {
+    if (!pins[p]) throw new Error(`${p} is not pinned in web/build.py`);
+    return pins[p].endsWith(".whl") ? new URL(pins[p], self.location).href : pins[p];
+  });
+  await py.runPythonAsync(`import micropip\nawait micropip.install(${JSON.stringify(specs)})`);
   todo.forEach((p) => loaded.add(p));
 }
 
