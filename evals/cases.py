@@ -85,6 +85,37 @@ def build_cases(d: Path) -> list[Case]:
     grid["t2m"].values[:, :2, :2] = -9999.0  # fill value nobody declared
     grid.to_netcdf(d / "planted_fill.nc")
 
+    months = pd.date_range("2001-01-01", periods=240, freq="MS")
+    ndvi = (
+        0.45
+        + 0.15 * np.sin(2 * np.pi * (months.month - 3) / 12)
+        - 0.005 * np.arange(240) / 12
+        + rng.normal(0, 0.01, 240)
+    )
+    pd.DataFrame({"date": months, "NDVI": ndvi.round(4)}).to_csv(
+        d / "greening_loss.csv", index=False
+    )
+    pd.DataFrame({"date": months, "sea_level_anomaly_mm": rng.normal(0, 5, 240).round(2)}).to_csv(
+        d / "flat_noise.csv", index=False
+    )
+    summer = pd.date_range("2024-06-01", periods=90, freq="D")
+    pd.DataFrame(
+        {"date": summer, "T2M": (25 + 0.08 * np.arange(90) + rng.normal(0, 1, 90)).round(2)}
+    ).to_csv(d / "one_summer.csv", index=False)
+    year = pd.date_range("2022-01-01", periods=365, freq="D")
+    pd.DataFrame(
+        {"date": year, "NDVI": (5000 + 2000 * np.sin(np.arange(365) / 58)).round().astype(int)}
+    ).to_csv(d / "unscaled_ndvi.csv", index=False)
+    rain = np.where(rng.random(365) < 0.3, rng.gamma(0.8, 6, 365), 0.0).round(1)
+    rain[[40, 41, 200]] = [-3.2, -1.0, -7.5]  # impossible negative rain
+    pd.DataFrame({"date": year, "precipitation_mm": rain}).to_csv(
+        d / "negative_rain.csv", index=False
+    )
+    kept = year.delete(range(120, 180))  # two months without data
+    pd.DataFrame({"date": kept, "T2M": (20 + rng.normal(0, 2, len(kept))).round(2)}).to_csv(
+        d / "gap_series.csv", index=False
+    )
+
     return [
         Case(
             "warming_grid",
@@ -129,6 +160,51 @@ def build_cases(d: Path) -> list[Case]:
             "clouds over ocean beside green and brown land (~9% cloud); needs a vision provider",
             ["image.white_low_saturation_pct"],
             [("cloud",), ("ocean", "water", "sea"), ("vegetat", "green")],
+        ),
+        Case(
+            "greening_loss",
+            d / "greening_loss.csv",
+            "seasonal NDVI losing 0.005 per year (browning)",
+            ["trends.NDVI.slope_per_year"],
+            [("decreas", "declin", "brown", "loss")],
+            ["significant increase", "greening trend", "increasing trend"],
+        ),
+        Case(
+            "flat_noise",
+            d / "flat_noise.csv",
+            "20 years of noise with no trend at all",
+            [],
+            [("no significant", "not significant", "no clear", "no trend")],
+            ["significant increase", "significant decrease", "significantly increasing"],
+        ),
+        Case(
+            "one_summer",
+            d / "one_summer.csv",
+            "90 summer days rising: the season, not a climate trend",
+            [],
+            [("short", "too few", "season", "summer")],
+            ["long-term warming", "climate change signal"],
+        ),
+        Case(
+            "unscaled_ndvi",
+            d / "unscaled_ndvi.csv",
+            "NDVI stored x10000 (scale factor not applied)",
+            [],
+            [("scale", "10000", "10,000")],
+        ),
+        Case(
+            "negative_rain",
+            d / "negative_rain.csv",
+            "three negative precipitation values (impossible)",
+            [],
+            [("negative",)],
+        ),
+        Case(
+            "gap_series",
+            d / "gap_series.csv",
+            "daily series with a two-month hole (May-June 2022)",
+            [],
+            [("gap", "missing")],
         ),
         Case(
             "paper",

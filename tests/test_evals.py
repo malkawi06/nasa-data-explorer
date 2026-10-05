@@ -2,6 +2,7 @@
 
 import json
 
+import pytest
 from test_interfaces import FakeProvider
 
 from evals.cases import build_cases
@@ -33,6 +34,12 @@ def test_cases_build_and_quality_checks_see_the_planted_problems(tmp_path):
         "fire_events",
         "cloudy_scene",
         "paper",
+        "greening_loss",
+        "flat_noise",
+        "one_summer",
+        "unscaled_ndvi",
+        "negative_rain",
+        "gap_series",
     }
     rep = process_file(cases["planted_fill"].path, ReadOptions(plots=False), tmp_path / "r")
     assert any(q["code"] == "undeclared_fill" for q in rep.analysis["quality"])
@@ -44,6 +51,20 @@ def test_cases_build_and_quality_checks_see_the_planted_problems(tmp_path):
     assert rep.analysis["trends"][0]["seasonal"]
     rep = process_file(cases["autocorrelated_noise"].path, ReadOptions(plots=False), tmp_path / "r")
     assert "Hamed-Rao" in rep.analysis["trends"][0]["method"]
+
+    def analysis(name):
+        return process_file(cases[name].path, ReadOptions(plots=False), tmp_path / "r").analysis
+
+    def codes(a):
+        return {q["code"] for q in a["quality"]}
+
+    t = analysis("greening_loss")["trends"][0]
+    assert t["mk_trend"] == "decreasing" and t["slope_per_year"] == pytest.approx(-0.005, abs=0.001)
+    assert analysis("flat_noise")["trends"][0]["mk_p"] > 0.05
+    assert "short_record" in codes(analysis("one_summer"))
+    assert "unscaled" in codes(analysis("unscaled_ndvi"))
+    assert "negative_values" in codes(analysis("negative_rain"))
+    assert "time_gaps" in codes(analysis("gap_series"))
 
 
 def test_score_good_and_bad_answers(tmp_path):

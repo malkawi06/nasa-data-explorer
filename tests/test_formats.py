@@ -2,6 +2,7 @@
 
 import json
 
+import numpy as np
 import pytest
 
 from nasa_explorer.core import ReadOptions
@@ -93,3 +94,45 @@ def test_json_summary_is_strict_json(samples, tmp_path):
     rep = process_file(samples["netcdf_packed"][0], ReadOptions(), tmp_path)
     text = rep.json_path.read_text(encoding="utf-8")
     json.loads(text, parse_constant=lambda c: (_ for _ in ()).throw(ValueError(c)))
+
+
+def _modis_tile(path, struct, dims, shape):
+    sd_mod = pytest.importorskip("pyhdf.SD")
+    sd = sd_mod.SD(str(path), sd_mod.SDC.WRITE | sd_mod.SDC.CREATE)
+    sd.attr("StructMetadata.0").set(sd_mod.SDC.CHAR8, struct)
+    sds = sd.create("NDVI", sd_mod.SDC.INT16, shape)  # no fill value set, like some products
+    sds.dim(0).setname(dims[0])
+    sds.dim(1).setname(dims[1])
+    sds[:] = np.arange(shape[0] * shape[1]).reshape(shape).astype("int16")
+    sds.endaccess()
+    sd.end()
+
+
+def _grid_struct(name, nx, ny, ul, lr, proj):
+    return (
+        f'GROUP=GridStructure\n\tGROUP=GRID_1\n\t\tGridName="{name}"\n\t\tXDim={nx}\n\t\tYDim={ny}\n'
+        f"\t\tUpperLeftPointMtrs=({ul[0]:.6f},{ul[1]:.6f})\n\t\tLowerRightMtrs=({lr[0]:.6f},{lr[1]:.6f})\n"
+        f"\t\tProjection={proj}\n\tEND_GROUP=GRID_1\nEND_GROUP=GridStructure\nEND"
+    )
+
+
+def test_modis_sinusoidal_tile_gets_its_bounding_box(tmp_path):
+    pytest.importorskip("rioxarray")
+    tile = 1111950.5196666666  # h21v05: the MODIS tile over Jordan and the Levant
+    x0, y0 = -20015109.354 + 21 * tile, 10007554.677 - 5 * tile
+    struct = _grid_struct("G", 60, 60, (x0, y0), (x0 + tile, y0 - tile), "GCTP_SNSOID")
+    path = tmp_path / "MOD13A2.A2020001.h21v05.061.hdf"
+    _modis_tile(path, struct, ("YDim:G", "XDim:G"), (60, 60))
+    rep = process_file(path, ReadOptions(plots=False), tmp_path / "r")
+    assert rep.reader == "hdf4" and rep.error is None
+    west, south, east, north = rep.analysis["coverage"]["space"]["bbox"]
+    assert (south, north) == (pytest.approx(30, abs=1e-3), pytest.approx(40, abs=1e-3))
+    assert west == pytest.approx(34.64, abs=0.01) and east == pytest.approx(52.22, abs=0.01)
+
+
+def test_modis_climate_grid_in_packed_degrees(tmp_path):
+    struct = _grid_struct("CMG", 36, 18, (-180e6, 90e6), (180e6, -90e6), "GCTP_GEO")
+    path = tmp_path / "MOD13C2.A2020001.061.hdf"
+    _modis_tile(path, struct, ("YDim:CMG", "XDim:CMG"), (18, 36))
+    rep = process_file(path, ReadOptions(plots=False), tmp_path / "r")
+    assert rep.analysis["coverage"]["space"]["bbox"] == [-175.0, -85.0, 175.0, 85.0]  # cell centres
