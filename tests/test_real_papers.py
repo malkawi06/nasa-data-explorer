@@ -71,6 +71,9 @@ def test_title_abstract_and_doi_from_real_papers(tmp_path):
                 # the opening of the abstract is enough: PDFs hyphenate and wrap lines
                 "abstract": _similar(abstract[:300], t["abstract"][: len(abstract[:300])]) >= 0.8,
                 "doi": (s.get("doi") or "").lower() == t["doi"] if doi_in_pdf else None,
+                "got_title": s.get("title", "")[:120],
+                "want_title": " ".join(t["title"].split())[:120],
+                "got_abstract": abstract[:120],
             }
         )
     report = "\n".join(str(r) for r in rows)
