@@ -29,6 +29,15 @@ SECTION_WORDS = (
     "future work",
 )
 _NUMBERED = re.compile(r"^(\d{1,2}(\.\d{1,2}){0,2})\.?\s+([A-Z][^\n]{2,80})$")
+# template and publisher lines printed above the title on the first page
+_BANNER = re.compile(
+    r"\btemplate\b|\bpreprint\b|submitted to|accepted (for|in|to)|manuscript|copyright|©"
+    r"|journal of|proceedings of|this is a .*version",
+    re.I,
+)
+_JOINER = re.compile(
+    r"\b(a|an|and|at|by|for|from|in|into|of|on|over|the|to|under|using|via|with)$|[:,\-–]$", re.I
+)
 _CAPTION = re.compile(r"^\s*((Fig\.|Figure|FIGURE|Fig)\s*\d+[a-z]?[.:]?\s.*)$")
 _TABLE_CAPTION = re.compile(r"^\s*((Table|TABLE)\s*\d+[.:]?\s.*)$")
 
@@ -159,18 +168,26 @@ def nasa_mentions(pages: list[str]) -> dict[str, list[int]]:
 
 def guess_title_authors(first_page: str) -> tuple[str, list[str]]:
     lines = [ln.strip() for ln in first_page.splitlines() if ln.strip()]
-    title = next(
+    start = next(
         (
-            ln
-            for ln in lines[:15]
+            i
+            for i, ln in enumerate(lines[:15])
             if 15 <= len(ln) <= 250
             and not ln.lower().startswith(("doi", "http", "vol", "journal", "arxiv"))
+            and not _BANNER.search(ln)
         ),
-        lines[0] if lines else "",
+        0,
     )
+    title, end = (lines[start], start) if lines else ("", -1)
+    # a long title wraps: the line ends on a joining word, or the next one goes on in lower case
+    while end + 1 < min(len(lines), start + 3) and (
+        _JOINER.search(title) or lines[end + 1][:1].islower()
+    ):
+        end += 1
+        title += " " + lines[end]
     authors: list[str] = []
-    if title in lines:
-        for ln in lines[lines.index(title) + 1 : lines.index(title) + 6]:
+    if lines:
+        for ln in lines[end + 1 : end + 6]:
             if ln.lower().startswith(("abstract", "1 ", "1.", "introduction")):
                 break
             if (

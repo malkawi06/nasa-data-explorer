@@ -7,6 +7,7 @@ import pytest
 from nasa_explorer.analysis.stats import describe_trend, human_delta, trend
 from nasa_explorer.core import ReadOptions
 from nasa_explorer.pipeline import process_file
+from nasa_explorer.readers._doctools import guess_title_authors
 
 
 def test_scale_offset_fill_applied(samples, tmp_path):
@@ -78,6 +79,27 @@ def test_document_extraction(samples, tmp_path):
     assert s["nasa_mentions"]["GPM"] == [2]
     assert any(c["caption"].startswith("Figure 1") and c["page"] == 2 for c in s["figure_captions"])
     assert any("Results" in x for x in s["sections"])
+
+
+def test_title_skips_template_banner_and_joins_wrapped_lines():
+    """The two layouts that failed on real arXiv papers (2307.10843, 2404.10135)."""
+    page = (
+        "Generated using the official AMS LATEX template v6.1\n"
+        "Using Long Short-term Memory (LSTM) to merge precipitation data over\n"
+        "mountainous area in Sierra Nevada\n"
+        "Ana Lopez, Ben Hart and Chen Wu\n"
+        "Abstract\n"
+    )
+    title, authors = guess_title_authors(page)
+    assert title == (
+        "Using Long Short-term Memory (LSTM) to merge precipitation data over "
+        "mountainous area in Sierra Nevada"
+    )
+    assert authors == ["Ana Lopez", "Ben Hart", "Chen Wu"]
+    # a complete one-line title does not swallow the author line
+    assert guess_title_authors("Warming Trends in Jordan\nA Smith, B Jones\n")[0] == (
+        "Warming Trends in Jordan"
+    )
 
 
 def test_scanned_pdf_ocr(samples, tmp_path):
