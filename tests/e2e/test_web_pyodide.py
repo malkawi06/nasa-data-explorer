@@ -2,6 +2,7 @@
 
 Opt-in: set E2E_PYODIDE=1 (the CI 'pyodide-e2e' job does). Verifies that every
 browser-supported format is read by the expected reader inside Pyodide.
+SITE_URL points it at a deployed copy instead of a local build (the Pages workflow does).
 """
 
 import os
@@ -39,7 +40,8 @@ EXPECTED = {  # sample key -> reader expected inside the browser
 
 
 def test_formats_in_real_pyodide(samples, tmp_path):
-    server = Server(tmp_path / "work")
+    site = os.environ.get("SITE_URL", "").rstrip("/")
+    server = None if site else Server(tmp_path / "work")
     files = [str(samples[k][0]) for k in EXPECTED if k in samples]
     shp = samples.get("shapefile")
     if shp:  # a shapefile needs all of its parts in one drop
@@ -52,7 +54,7 @@ def test_formats_in_real_pyodide(samples, tmp_path):
             page = ctx.new_page()
             errors: list[str] = []
             page.on("pageerror", lambda e: errors.append(str(e)))
-            page.goto(f"{server.url}/index.html")
+            page.goto(f"{site or server.url}/index.html")
             page.wait_for_selector(".dot.ready, .dot.error", timeout=420_000)
             status = page.inner_text("#status-text")
             assert page.locator(".dot.ready").count(), f"Pyodide failed to start: {status}"
@@ -69,7 +71,8 @@ def test_formats_in_real_pyodide(samples, tmp_path):
             )
             browser.close()
     finally:
-        server.close()
+        if server:
+            server.close()
         shutil.rmtree(tmp_path / "work", ignore_errors=True)
     by_file = {name: (meta.split(" · ")[0], ok) for name, meta, ok in cards}
     wrong = []

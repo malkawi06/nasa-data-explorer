@@ -17,6 +17,8 @@ concurrency:
 jobs:
   deploy:
     runs-on: ubuntu-latest
+    outputs:
+      page_url: ${{ steps.deployment.outputs.page_url }}
     environment:
       name: github-pages
       url: ${{ steps.deployment.outputs.page_url }}
@@ -32,3 +34,24 @@ jobs:
           path: web/dist
       - id: deployment
         uses: actions/deploy-pages@v4
+
+  live-check:
+    name: deployed site on real Pyodide
+    needs: deploy
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+      - name: Install
+        run: |
+          python -m pip install --upgrade pip
+          pip install -e ".[geo,astro,docs,dev]"
+          python -m playwright install --with-deps chromium
+      - name: Drop the sample files on the live site
+        env:
+          E2E_PYODIDE: "1"
+          SITE_URL: ${{ needs.deploy.outputs.page_url }}
+        run: pytest -q -rs tests/e2e/test_web_pyodide.py
