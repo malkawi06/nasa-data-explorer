@@ -44,7 +44,7 @@ def test_build_bundles_package(tmp_path, monkeypatch):
     bundle = build.build()
     names = zipfile.ZipFile(bundle).namelist()
     assert "bridge.py" in names and "nasa_explorer/readers/netcdf.py" in names
-    assert {"index.html", "app.js", "ai.js", "style.css"} <= {
+    assert {"index.html", "app.js", "ai.js", "style.css", "og.png"} <= {
         p.name for p in (tmp_path / "dist").iterdir()
     }
     pins = json.loads((tmp_path / "dist" / "wheels" / "index.json").read_text())

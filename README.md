@@ -223,6 +223,9 @@ Then open http://localhost:8000.
 - CSV/TSV/TXT, Excel, JSON, Parquet, NetCDF, HDF5, Zarr, GeoTIFF, Shapefile/GeoJSON/KML/GPKG, FITS,
   images, PDF (text through pypdf), DOCX, HTML, Markdown, and ZIP/TAR/GZ archives.
 - Extra libraries load the first time a format needs them.
+- **Copy link** puts the report, without its charts, into the link itself (compressed in the
+  `#` part, which browsers never send to the server). Opening the link shows the report at once,
+  without downloading Python.
 
 **AI on the website (bring your own key):**
 - Open *AI settings* and pick a provider:

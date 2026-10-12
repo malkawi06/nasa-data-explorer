@@ -39,6 +39,13 @@ const T = {
     saved: "Saved.",
     desktop: "This format (GRIB / HDF4) needs native libraries the browser lacks. Run: pip install \"nasa-data-explorer[grib,hdf4]\" then nasa-explore FILE",
     analysing: "analysing…",
+    share: "Copy link",
+    shareDone: (kb) => `Link copied (${kb} KB). Charts are left out; numbers and checks are in it.`,
+    shareLong: "This report is too large for a link. Download the HTML instead.",
+    shareAsk: "Copy this link:",
+    sharedMeta: "Shared report: made by whoever sent this link, from their file. Charts are not included.",
+    sharedReady: "Showing a shared report. Drop a file to analyse your own.",
+    sharedBad: "This shared link is damaged or incomplete.",
   },
   ar: {
     title: "مستكشف بيانات ناسا",
@@ -79,6 +86,13 @@ const T = {
     f2t: "أكثر من 30 صيغة", f2: "تُكتشف الصيغة من محتوى الملف نفسه، حتى لو كان الامتداد خاطئاً.",
     f3t: "ذكاء اصطناعي مُدقَّق", f3: "ملخص اختياري يُفحص فيه كل رقم مقابل البيانات.",
     analysing: "جارٍ التحليل…",
+    share: "نسخ رابط",
+    shareDone: (kb) => `تم نسخ الرابط (${kb} كيلوبايت). الرسوم غير مضمّنة؛ الأرقام والفحوصات موجودة.`,
+    shareLong: "التقرير أكبر من أن يوضع في رابط. نزّل ملف HTML بدلاً من ذلك.",
+    shareAsk: "انسخ هذا الرابط:",
+    sharedMeta: "تقرير مُشارَك: أنشأه مُرسِل الرابط من ملفه. الرسوم غير مضمّنة.",
+    sharedReady: "يُعرض تقرير مُشارَك. اسحب ملفاً لتحليل ملفك.",
+    sharedBad: "رابط المشاركة تالف أو ناقص.",
   },
 };
 
@@ -156,6 +170,9 @@ function applyLang(lang) {
 }
 
 // ---------------------------------------------------------------- boot
+
+let booting = null;
+const start = () => (booting ??= boot());
 
 async function boot() {
   try {
@@ -261,12 +278,15 @@ function renderDetail() {
   $("#empty").hidden = true;
   $("#detail").hidden = false;
   $("#detail .file").textContent = r.file;
-  $("#detail .meta").textContent = `${r.reader} · ${r.kind}`;
+  $("#detail .meta").textContent = r.shared ? t("sharedMeta") : `${r.reader} · ${r.kind}`;
   const desktopOnly = r.missing.some((m) => ["cfgrib", "pyhdf"].includes(m));
   const err = $("#detail .err");
   err.hidden = !(r.error || desktopOnly);
   err.textContent = r.error || (desktopOnly ? t("desktop") : "");
-  $("#detail .tablist").hidden = Boolean(r.error || r.kind === "binary");
+  $("#detail .tablist").hidden = Boolean(r.error || r.kind === "binary" || r.shared);
+  $(".dl-json").hidden = Boolean(r.shared);
+  $(".share").hidden = Boolean(r.error);
+  $(".share-status").textContent = "";
   renderInto($(".preview"), r.html);
   const aiHost = $(".ai-frame");
   aiHost.hidden = !r.ai.panel;
@@ -315,6 +335,57 @@ $(".open").onclick = () => {
 $(".dl-html").onclick = () => download(`${baseName(current())}.html`, current().html, "text/html");
 $(".dl-json").onclick = () => download(`${baseName(current())}.json`, current().json, "application/json");
 
+// ---------------------------------------------------------------- share link
+// The report (without its charts) is deflated into the URL fragment, which browsers never send
+// to the server: the link itself is the report. Opening one renders it through the same
+// sanitizer as any report, without starting Python.
+
+const SHARE_MAX = 64 * 1024; // characters; chat apps cut longer links
+const toB64 = (bytes) => btoa(Array.from(bytes, (b) => String.fromCharCode(b)).join(""))
+  .replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
+const fromB64 = (s) => Uint8Array.from(atob(s.replace(/-/g, "+").replace(/_/g, "/")), (c) => c.charCodeAt(0));
+const pipe = (bytes, stream) => new Response(new Blob([bytes]).stream().pipeThrough(stream)).arrayBuffer();
+
+async function shareLink(html) {
+  const doc = new DOMParser().parseFromString(html, "text/html");
+  doc.querySelectorAll("#plots, .toc a[href='#plots'], img[src^='data:']").forEach((el) => el.remove());
+  const packed = await pipe(new TextEncoder().encode(doc.documentElement.outerHTML), new CompressionStream("deflate-raw"));
+  return `${location.origin}${location.pathname}#r=${toB64(new Uint8Array(packed))}`;
+}
+
+$(".share").onclick = async () => {
+  const status = $(".share-status");
+  const url = await shareLink(current().html);
+  if (url.length > SHARE_MAX) return void (status.textContent = t("shareLong"));
+  try {
+    await navigator.clipboard.writeText(url);
+    status.textContent = t("shareDone", Math.ceil(url.length / 1024));
+  } catch {
+    window.prompt(t("shareAsk"), url);
+  }
+};
+
+async function openShared() {
+  const m = location.hash.match(/^#r=([\w-]+)$/);
+  if (!m) return false;
+  try {
+    const html = new TextDecoder().decode(await pipe(fromB64(m[1]), new DecompressionStream("deflate-raw")));
+    const doc = new DOMParser().parseFromString(html, "text/html");
+    const file = doc.querySelector(".rep-head h1")?.textContent || "report";
+    state.results.set("shared", { file, shared: true, reader: "shared", kind: "report", headline: "",
+      missing: [], html, json: "", ai: {}, chat: [] });
+    state.order.unshift("shared");
+    select("shared");
+    setStatus(["sharedReady"], "ready");
+    setProgress(0);
+    return true;
+  } catch (err) {
+    console.error(err);
+    setStatus(["sharedBad"], "error");
+    return true; // keep the message up; Python starts on the first dropped file
+  }
+}
+
 // ---------------------------------------------------------------- analysis
 
 function enqueue(files) {
@@ -322,6 +393,7 @@ function enqueue(files) {
   if (!files.length) return;
   const big = files.find((f) => f.size > MAX_MB * 1024 * 1024);
   if (big) return setStatus(["tooBig", big.name], "error");
+  start();
   if (!state.ready || state.busy) {
     state.queue.push(...files);
     if (!state.ready) setStatus(["queued", state.queue.length]);
@@ -486,4 +558,4 @@ initSettings();
 applyLang(navigator.language?.startsWith("ar") ? "ar" : "en");
 setStatus(["loading"]);
 setProgress(null);
-boot();
+openShared().then((shown) => shown || start());

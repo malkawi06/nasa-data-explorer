@@ -8,6 +8,15 @@
   <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self'; worker-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; font-src 'self' data:; connect-src 'self' https: http://localhost:* http://127.0.0.1:*; object-src 'none'; base-uri 'none'; form-action 'none'">
   <title>NASA Data Explorer</title>
   <meta name="description" content="Drop any NASA or scientific data file and get an instant analysis report. Runs entirely in your browser.">
+  <meta property="og:type" content="website">
+  <meta property="og:title" content="NASA Data Explorer">
+  <meta property="og:description" content="Drop any NASA or scientific data file and get an instant analysis report. Runs entirely in your browser.">
+  <meta property="og:url" content="https://malkawi06.github.io/nasa-data-explorer/">
+  <meta property="og:image" content="https://malkawi06.github.io/nasa-data-explorer/og.png">
+  <meta property="og:image:width" content="1200">
+  <meta property="og:image:height" content="630">
+  <meta property="og:image:alt" content="NASA Data Explorer: understand any NASA data file in minutes">
+  <meta name="twitter:card" content="summary_large_image">
   <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Ccircle cx='16' cy='16' r='14' fill='%232a78d6'/%3E%3Cpath d='M6 20c6-1 14-6 20-12' stroke='%23fff' stroke-width='2.5' fill='none'/%3E%3C/svg%3E">
   <link rel="stylesheet" href="style.css">
 </head>
@@ -88,6 +97,8 @@
             <button type="button" class="btn open" data-i18n="open">Open in new tab</button>
             <button type="button" class="btn dl-html" data-i18n="html">HTML</button>
             <button type="button" class="btn dl-json" data-i18n="json">JSON</button>
+            <button type="button" class="btn share" data-i18n="share">Copy link</button>
+            <span class="share-status hint" role="status"></span>
           </div>
         </header>
         <p class="err" hidden></p>

@@ -157,3 +157,73 @@ def test_file_content_cannot_run_script(strict_page, tmp_path):
     assert page.evaluate(f"{root}.querySelectorAll('[onerror], script').length") == 0
     assert "&lt;img src=x" in _report_text(page)  # shown as text
     assert not csp, csp  # the policy does not get in the way of the app itself
+
+
+def _link(html: str) -> str:
+    """A share fragment as the page builds it: raw deflate, base64url."""
+    import base64
+    import zlib
+
+    z = zlib.compressobj(9, zlib.DEFLATED, -15)
+    packed = z.compress(html.encode()) + z.flush()
+    return "#r=" + base64.urlsafe_b64encode(packed).decode().rstrip("=")
+
+
+def _fresh(page, fragment: str):
+    """Open the site with a fragment in a new tab (a hash change alone does not reload)."""
+    cdn: list[str] = []
+    tab = page.context.new_page()
+    tab.on("request", lambda r: cdn.append(r.url) if "cdn.jsdelivr.net" in r.url else None)
+    tab.goto(page.url.split("#")[0] + fragment)
+    return tab, cdn
+
+
+def test_share_link_opens_the_report_without_python(page, samples):
+    page.context.grant_permissions(["clipboard-read", "clipboard-write"])
+    page.set_input_files("#file-input", [str(samples["netcdf4"][0])])
+    page.wait_for_selector(".file-item:not(.pending)", timeout=60000)
+    assert "data:image/png" in _report_text(page)  # the full report has charts
+    page.click(".share")
+    page.wait_for_function("document.querySelector('.share-status').textContent.length > 0")
+    assert "Link copied" in page.locator(".share-status").inner_text()
+    url = page.evaluate("navigator.clipboard.readText()")
+    assert "#r=" in url and len(url) < 20_000
+
+    tab, cdn = _fresh(page, "#" + url.split("#", 1)[1])
+    tab.wait_for_selector("#detail:not([hidden])", timeout=10000)
+    shown = tab.evaluate("document.querySelector('.preview').shadowRoot.innerHTML")
+    assert "kpis" in shown and "data:image" not in shown and 'id="plots"' not in shown
+    assert tab.locator(".detail-title .file").inner_text() == "grid.nc"
+    assert "Shared report" in tab.locator(".detail-title .meta").inner_text()
+    assert tab.locator("#detail .tablist").is_hidden() and tab.locator(".dl-json").is_hidden()
+    assert not cdn  # Python is not downloaded just to look at a shared report
+
+    tab.set_input_files("#file-input", [str(samples["csv"][0])])  # dropping a file starts it
+    tab.wait_for_selector(".file-item:not(.pending) >> text=fires.csv", timeout=60000)
+    assert cdn and tab.locator(".file-item").count() == 2
+    assert not page.errors
+
+
+def test_shared_link_cannot_run_script(strict_page):
+    evil = (
+        "<html><body><main><header class='rep-head'><h1>evil.csv</h1></header>"
+        "<img src=x onerror='window.__xss=1'><script>window.__xss=2</script>"
+        "<a href='javascript:window.__xss=3'>x</a><p>numbers</p></main></body></html>"
+    )
+    tab, _ = _fresh(strict_page, _link(evil))
+    tab.wait_for_selector("#detail:not([hidden])", timeout=10000)
+    tab.wait_for_timeout(300)
+    root = "document.querySelector('.preview').shadowRoot"
+    assert tab.evaluate("window.__xss") is None
+    assert (
+        tab.evaluate(f"{root}.querySelectorAll('[onerror], script, [href^=javascript]').length")
+        == 0
+    )
+    assert "numbers" in tab.evaluate(f"{root}.innerHTML")
+
+
+def test_damaged_share_link_says_so(page):
+    tab, cdn = _fresh(page, "#r=not-a-real-report")
+    tab.wait_for_selector(".dot.error", timeout=10000)
+    assert "damaged" in tab.locator("#status-text").inner_text()
+    assert tab.locator("#detail").is_hidden() and not cdn

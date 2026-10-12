@@ -18,6 +18,7 @@ ROOT = Path(__file__).resolve().parent.parent
 WEB = ROOT / "web"
 DIST = WEB / "dist"
 STATIC = ("index.html", "app.js", "ai.js", "worker.js", "style.css")
+ASSETS = ("og.png",)  # binary, copied as is (link preview image)
 
 
 # Pure-Python packages the browser installs with micropip: pinned (a new release on PyPI can
@@ -121,6 +122,8 @@ def build(wheels: bool = False) -> Path:
             new = f">v {version[:7]}<" if ref == ">v dev<" else f"{ref[:-1]}?v={version}{ref[-1]}"
             text = text.replace(ref, new)
         (DIST / name).write_text(text, encoding="utf-8")
+    for name in ASSETS:
+        shutil.copyfile(WEB / name, DIST / name)
     bundle = DIST / "nasa_explorer.zip"
     with zipfile.ZipFile(bundle, "w", zipfile.ZIP_DEFLATED) as zf:
         for path in sorted((ROOT / "nasa_explorer").rglob("*.py")):
